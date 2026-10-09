@@ -1,0 +1,1793 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Data center osint</title>
+<style>
+:root{
+  --paper:#EEF0EC;--paper-2:#E3E7E1;--ink:#14201C;--ink-soft:#4A5A54;
+  --rule:#B9C2BB;--water:#0F6B5C;--plume:#1B4FD8;--heavy:#B3261E;--white:#FFFFFF;
+  --t-dc:#0F6B5C;--t-power:#B3261E;--t-ind:#6B4A9A;--t-tower:#1B4FD8;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--paper)}
+body{font-family:ui-sans-serif,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+  color:var(--ink);font-size:15px;line-height:1.45}
+#stage{position:fixed;inset:0}
+canvas{display:block;touch-action:none}
+
+#masthead{position:fixed;top:0;left:0;right:0;padding:10px 14px 9px;
+  display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
+  background:linear-gradient(to bottom,rgba(238,240,236,.96),rgba(238,240,236,0));
+  pointer-events:none;z-index:5}
+#masthead h1{margin:0;font-size:19px;font-weight:650;letter-spacing:-.02em}
+#masthead span{font-size:12.5px;color:var(--ink-soft)}
+
+#panel{position:fixed;left:0;right:0;bottom:0;max-height:66vh;background:var(--white);
+  border-top:1px solid var(--rule);z-index:6;display:flex;flex-direction:column;
+  transform:translateY(calc(100% - 52px));transition:transform .28s cubic-bezier(.2,.7,.2,1)}
+#panel.open{transform:translateY(0)}
+#grip{height:52px;flex:0 0 52px;display:flex;align-items:center;gap:10px;
+  padding:0 14px;cursor:pointer;border-bottom:1px solid var(--rule)}
+#grip .bar{width:34px;height:3px;border-radius:2px;background:var(--rule)}
+#grip .label{font-size:14px;font-weight:600}
+#grip .count{margin-left:auto;font-size:13px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+#panelbody{overflow-y:auto;padding:14px 14px 28px;-webkit-overflow-scrolling:touch}
+
+.sect{padding:14px 0;border-bottom:1px solid var(--paper-2)}
+.sect:first-child{padding-top:0}
+.sect:last-child{border-bottom:0}
+.sect h2{margin:0 0 9px;font-size:13.5px;font-weight:650;letter-spacing:-.01em}
+.sect p{margin:0 0 9px;font-size:13px;color:var(--ink-soft);line-height:1.5}
+.sect p:last-child{margin-bottom:0}
+.sub{font-size:12.5px;font-weight:650;margin:12px 0 7px;color:var(--ink)}
+
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:9px}
+.row:last-child{margin-bottom:0}
+button.chip{font:inherit;font-size:13px;padding:7px 12px;border:1px solid var(--rule);
+  background:var(--white);color:var(--ink);border-radius:2px;cursor:pointer;
+  display:inline-flex;align-items:center;gap:7px}
+button.chip.on{background:var(--ink);color:var(--white);border-color:var(--ink)}
+button.chip:focus-visible{outline:2px solid var(--water);outline-offset:2px}
+.sw{display:inline-block;width:10px;height:10px;border-radius:50%;border:1px solid var(--ink)}
+button.chip.on .sw{border-color:var(--white)}
+
+.slider{margin-bottom:13px}
+.slider:last-child{margin-bottom:0}
+.slider .head{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;margin-bottom:3px}
+.slider .head b{font-weight:600}
+.slider .head var{font-style:normal;font-variant-numeric:tabular-nums;color:var(--water);font-weight:600}
+.slider .note{font-size:11.5px;color:var(--ink-soft);margin-top:2px;line-height:1.4}
+input[type=range]{width:100%;accent-color:var(--water);margin:0}
+input[type=text]{font:inherit;font-size:13px;width:100%;padding:8px 10px;
+  border:1px solid var(--rule);border-radius:2px;background:var(--white);color:var(--ink)}
+input[type=text]:focus-visible{outline:2px solid var(--water);outline-offset:1px}
+
+table.readout{width:100%;border-collapse:collapse;font-size:13px}
+table.readout td{padding:4px 0;vertical-align:top}
+table.readout td:first-child{color:var(--ink-soft);padding-right:12px;width:52%}
+table.readout td:last-child{font-variant-numeric:tabular-nums;font-weight:600;text-align:right}
+
+#sel{display:none}
+#sel.show{display:block}
+#selkind{font-size:11.5px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;margin:0 0 3px}
+#selname{font-size:15px;font-weight:650;margin:0 0 2px;line-height:1.25}
+#selop{font-size:12.5px;color:var(--ink-soft);margin:0 0 10px}
+
+.legend{display:flex;align-items:flex-end;gap:5px;height:44px;margin-bottom:6px}
+.legend i{display:block;width:16px;border:1px solid var(--ink);border-bottom:0}
+.legend-cap{display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-soft)}
+.keyrow{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px;color:var(--ink-soft);margin-top:10px}
+.keyrow span{display:inline-flex;align-items:center;gap:6px}
+.dsw{display:inline-block;width:14px;height:10px;border:1px solid var(--ink)}
+
+#status{position:fixed;left:14px;bottom:62px;z-index:4;font-size:12px;color:var(--ink-soft);
+  background:rgba(238,240,236,.9);padding:3px 7px;border-radius:2px;pointer-events:none;max-width:72vw}
+#sat{width:100%;border:1px solid var(--rule);display:block;background:var(--paper-2)}
+.hint{font-size:11.5px;color:var(--ink-soft);margin-top:6px;line-height:1.4}
+code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;background:var(--paper-2);padding:1px 4px}
+
+@media (min-width:820px){
+  #panel{left:auto;right:0;top:0;bottom:0;width:392px;max-height:none;
+    border-top:0;border-left:1px solid var(--rule);transform:none}
+  #grip{display:none}
+  #panelbody{padding:58px 18px 30px}
+  #masthead{right:392px}
+  #status{bottom:14px}
+}
+@media (prefers-reduced-motion:reduce){ #panel{transition:none} }
+</style>
+</head>
+<body>
+
+<div id="stage"></div>
+
+<div id="masthead">
+  <h1>Data center osint</h1>
+  <span id="scope">whole country</span>
+</div>
+
+<div id="status">Loading base map</div>
+
+<div id="panel">
+  <div id="grip" role="button" tabindex="0" aria-expanded="false">
+    <div class="bar"></div>
+    <div class="label">Survey controls</div>
+    <div class="count" id="gripcount"></div>
+  </div>
+  <div id="panelbody">
+
+    <div class="sect" id="sel">
+      <p id="selkind"></p>
+      <p id="selname"></p>
+      <p id="selop"></p>
+      <table class="readout" id="seltable"></table>
+      <div class="row" style="margin-top:10px">
+        <button class="chip" id="btnplume">Trace the vapor downwind</button>
+        <button class="chip" id="btnclear">Clear</button>
+      </div>
+      <div class="hint" id="plumehint"></div>
+    </div>
+
+    <div class="sect">
+      <h2>Where to look</h2>
+      <div class="row">
+        <button class="chip" data-scope="west">CA, AZ, NV</button>
+        <button class="chip" data-scope="CA">California</button>
+        <button class="chip" data-scope="AZ">Arizona</button>
+        <button class="chip" data-scope="NV">Nevada</button>
+        <button class="chip" data-scope="southwest">Southwest</button>
+        <button class="chip on" data-scope="us">Whole country</button>
+      </div>
+      <div class="hint">The whole country pulls several thousand records from four services and takes a while over mobile data. Each area caches for the session once it lands.</div>
+    </div>
+
+    <div class="sect">
+      <h2>Layers</h2>
+      <div class="row">
+        <button class="chip on" data-src="dc"><i class="sw" style="background:var(--t-dc)"></i>Data centers</button>
+        <button class="chip on" data-src="power"><i class="sw" style="background:var(--t-power)"></i>Thermal power plants</button>
+        <button class="chip on" data-src="industry"><i class="sw" style="background:var(--t-ind)"></i>Heavy industry</button>
+        <button class="chip on" data-src="tower"><i class="sw" style="background:var(--t-tower)"></i>Mapped cooling towers</button>
+        <button class="chip on" data-src="drought"><i class="dsw" style="background:#E8913A"></i>Drought</button>
+      </div>
+      <div class="row">
+        <button class="chip on" data-mode="speckle">Pen dots</button>
+        <button class="chip on" data-mode="piece">Standing pieces</button>
+      </div>
+      <table class="readout" id="layerstatus"></table>
+    </div>
+
+    <div class="sect">
+      <h2>Water put into the air here</h2>
+      <table class="readout" id="totals"></table>
+    </div>
+
+    <div class="sect">
+      <h2>Drawn from ground already in drought</h2>
+      <table class="readout" id="droughttotals"></table>
+      <div class="hint">Facilities sitting inside a current drought monitor polygon, by the worst category covering their point.</div>
+    </div>
+
+    <div class="sect">
+      <h2>Largest estimated draws here</h2>
+      <table class="readout" id="toplist"></table>
+    </div>
+
+    <div class="sect">
+      <h2>Counties carrying the load</h2>
+      <table class="readout" id="counties"></table>
+      <div class="hint" id="countyhint"></div>
+    </div>
+
+    <div class="sect">
+      <h2>Owners and operators</h2>
+      <table class="readout" id="operators"></table>
+    </div>
+
+    <div class="sect">
+      <h2>Consumption model</h2>
+      <p>Locations, capacities and industry classes come from the sources. Water figures are modeled from them with the assumptions below, so every piece on the map moves when a slider moves.</p>
+
+      <div class="sub">Data centers</div>
+      <div class="slider" data-k="density">
+        <div class="head"><b>Power density</b><var></var></div>
+        <input type="range" min="60" max="400" step="10" value="150">
+        <div class="note">Watts of computing per square foot of raised floor. Older colocation sits near 80. New training halls run past 300.</div>
+      </div>
+      <div class="slider" data-k="white">
+        <div class="head"><b>Raised floor share</b><var></var></div>
+        <input type="range" min="25" max="80" step="1" value="50">
+        <div class="note">Portion of the building holding racks.</div>
+      </div>
+      <div class="slider" data-k="pue">
+        <div class="head"><b>Total power per watt of computing</b><var></var></div>
+        <input type="range" min="105" max="200" step="1" value="140">
+        <div class="note">Everything the site draws, divided by what the servers draw. All of it leaves as heat.</div>
+      </div>
+      <div class="slider" data-k="evap">
+        <div class="head"><b>Heat rejected by evaporation</b><var></var></div>
+        <input type="range" min="0" max="100" step="1" value="60">
+        <div class="note">Zero means a fully closed loop site, where heat leaves as warm air and the water figure falls to nothing.</div>
+      </div>
+      <div class="slider" data-k="coc">
+        <div class="head"><b>Cycles of concentration</b><var></var></div>
+        <input type="range" min="2" max="12" step="1" value="5">
+        <div class="note">How many times loop water is reused before minerals force a dump to sewer.</div>
+      </div>
+      <div class="slider" data-k="area">
+        <div class="head"><b>Assumed size when unmeasured</b><var></var></div>
+        <input type="range" min="20" max="600" step="10" value="100">
+        <div class="note">Thousands of square feet, for records mapped as a bare point with no outline.</div>
+      </div>
+
+      <div class="sub">Thermal power plants</div>
+      <div class="slider" data-k="wet">
+        <div class="head"><b>Steam capacity on wet cooling</b><var></var></div>
+        <input type="range" min="0" max="100" step="1" value="85">
+        <div class="note">Share of steam turbine capacity rejecting heat through evaporative towers. The rest is treated as dry cooled or once through, with near zero evaporation on site.</div>
+      </div>
+      <div class="slider" data-k="cf">
+        <div class="head"><b>Running hours versus typical</b><var></var></div>
+        <input type="range" min="25" max="200" step="5" value="100">
+        <div class="note">Scales the typical capacity factor for each fuel. Push it up for a summer peak, down for a mild month.</div>
+      </div>
+
+      <div class="sub">Heavy industry</div>
+      <div class="slider" data-k="ind">
+        <div class="head"><b>Plant size versus class typical</b><var></var></div>
+        <input type="range" min="25" max="400" step="5" value="100">
+        <div class="note">Each industrial facility starts at the typical consumption for its class, taken from published water intensity for refineries, mills, fabs, smelters and the rest. This scales all of them together.</div>
+      </div>
+    </div>
+
+    <div class="sect">
+      <h2>Reading the map</h2>
+      <div class="legend" id="legend"></div>
+      <div class="legend-cap"><span>ten thousand</span><span>gallons per day, log scale</span><span>ten million plus</span></div>
+      <div class="keyrow">
+        <span><i class="sw" style="background:var(--t-dc)"></i>Data center, box with stack</span>
+        <span><i class="sw" style="background:var(--t-power)"></i>Power plant, curved tower</span>
+        <span><i class="sw" style="background:var(--t-ind)"></i>Industry, block with chimney</span>
+        <span><i class="sw" style="background:var(--t-tower)"></i>Mapped cooling tower</span>
+      </div>
+      <div class="keyrow" id="droughtkey"></div>
+      <p style="margin-top:10px">Pen dots carry the layer colour so a cluster reads by type from high up. Standing pieces carry the water colour and height, on a log scale so a data center and a nuclear station can share one map. Mapped cooling towers are physical structures drawn from the contributor database, most belonging to a plant already counted, so they carry no gallons of their own.</p>
+    </div>
+
+    <div class="sect">
+      <h2>Where the data comes from</h2>
+      <p>Data centers and cooling towers come from the OpenStreetMap contributor database through the Overpass interface. Data center roof area is measured off the mapped outline.</p>
+      <p>Power plants come from the federal energy statistics plant inventory, every operable plant of one megawatt or more, with megawatts broken out by fuel and the prime mover technology. Only plants running a steam cycle or geothermal are kept, since combustion turbines, solar, wind and batteries put no water into the air.</p>
+      <p>Heavy industry comes from the federal greenhouse gas reporting program facility register, which every large emitter files with location and industry code. The industry code sets the class and the class sets the typical draw.</p>
+      <p>Drought is the current weekly drought monitor release. Wind comes from the Open-Meteo aggregation of national weather service models at the 850 hectopascal level, around 1500 metres, which is the layer a warm plume reaches.</p>
+    </div>
+
+    <div class="sect">
+      <h2>Backend</h2>
+      <p>Leave this blank and the page talks to the public sources directly from your browser. Paste your deployed service address to route every request through it instead, which hides the sources, caches the answers and gets past services that refuse browser requests.</p>
+      <input type="text" id="apibase" placeholder="your service address, no protocol prefix" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div class="hint">Also accepted as a query parameter, <code>?api=</code>, so a bookmark can carry it.</div>
+    </div>
+
+    <div class="sect">
+      <h2>Live satellite</h2>
+      <img id="sat" alt="Latest visible and infrared composite over the contiguous United States" width="1250" height="750">
+      <div class="hint" id="sattime"></div>
+    </div>
+
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<script>
+(function(){
+"use strict";
+
+/* ================= endpoints ================= */
+
+var STATES_URL   = "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json";
+var COUNTIES_URL = "https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json";
+var OVERPASS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.osm.ch/api/interpreter"
+];
+var POWER_LAYER   = "https://geo.epa.ohio.gov/arcgis/rest/services/Hosted/PowerPlants_US_EIA/FeatureServer/0";
+var DROUGHT_LAYER = "https://services5.arcgis.com/0OTVzJS4K09zlixn/arcgis/rest/services/USDM_current/FeatureServer/0";
+var GHG_BASE      = "https://data.epa.gov/efservice/PUB_DIM_FACILITY/STATE/=/";
+var METEO = "https://api.open-meteo.com/v1/forecast";
+var SAT   = "https://cdn.star.nesdis.noaa.gov/GOES18/ABI/CONUS/GEOCOLOR/1250x750.jpg";
+
+var FIPS = {
+  "01":"AL","02":"AK","04":"AZ","05":"AR","06":"CA","08":"CO","09":"CT","10":"DE",
+  "11":"DC","12":"FL","13":"GA","15":"HI","16":"ID","17":"IL","18":"IN","19":"IA",
+  "20":"KS","21":"KY","22":"LA","23":"ME","24":"MD","25":"MA","26":"MI","27":"MN",
+  "28":"MS","29":"MO","30":"MT","31":"NE","32":"NV","33":"NH","34":"NJ","35":"NM",
+  "36":"NY","37":"NC","38":"ND","39":"OH","40":"OK","41":"OR","42":"PA","44":"RI",
+  "45":"SC","46":"SD","47":"TN","48":"TX","49":"UT","50":"VT","51":"VA","53":"WA",
+  "54":"WV","55":"WI","56":"WY"
+};
+var ALL_STATES = Object.keys(FIPS).map(function(k){ return FIPS[k]; });
+var NAME_TO_ABBR = {}, ABBR_TO_NAME = {};
+
+var SCOPES = {
+  west:{label:"California, Arizona, Nevada", states:["CA","AZ","NV"]},
+  CA:{label:"California", states:["CA"]},
+  AZ:{label:"Arizona", states:["AZ"]},
+  NV:{label:"Nevada", states:["NV"]},
+  southwest:{label:"the southwest", states:["CA","AZ","NV","NM","UT","CO","TX","OR","ID","WY"]},
+  us:{label:"whole country", states:null}
+};
+
+/* ================= model tables ================= */
+
+var LATENT_HEAT = 2440000, L_PER_GAL = 3.785411784;
+
+/* consumptive gallons per megawatt hour on recirculating towers, and typical capacity factor */
+var THERMAL = {
+  nuclear:{gpm:672, cf:0.92, label:"Nuclear steam"},
+  coal:{gpm:687, cf:0.45, label:"Coal steam"},
+  ngcc:{gpm:198, cf:0.57, label:"Gas combined cycle"},
+  gassteam:{gpm:826, cf:0.12, label:"Gas or oil steam"},
+  bio:{gpm:553, cf:0.55, label:"Biomass or waste steam"},
+  geo:{gpm:0, cf:0.70, label:"Geothermal"}
+};
+
+/* industry code prefix, class, typical consumptive gallons per day */
+var INDUSTRY = [
+  ["325193","Ethanol plant",700000],
+  ["324110","Petroleum refinery",3000000],
+  ["3241","Petroleum products plant",400000],
+  ["3221","Pulp and paper mill",2500000],
+  ["3222","Paper products plant",300000],
+  ["3344","Semiconductor fab",2000000],
+  ["2122","Metal mine",5000000],
+  ["2123","Mineral mine",800000],
+  ["3311","Iron and steel mill",1500000],
+  ["3312","Steel products plant",600000],
+  ["3313","Aluminum plant",1200000],
+  ["3314","Copper or nonferrous smelter",1500000],
+  ["325","Chemical plant",1000000],
+  ["3273","Cement plant",250000],
+  ["3274","Lime plant",150000],
+  ["3272","Glass plant",150000],
+  ["3112","Grain or oilseed mill",600000],
+  ["3113","Sugar refinery",800000],
+  ["3116","Meat processing plant",500000],
+  ["311","Food processing plant",400000],
+  ["3121","Beverage plant",300000]
+];
+
+var DROUGHT_COLORS = [0xF4EA7A, 0xF2C46B, 0xE8913A, 0xD0452E, 0x8E1F17];
+var DROUGHT_NAMES = ["Abnormally dry","Moderate drought","Severe drought","Extreme drought","Exceptional drought"];
+
+var TYPE_COLOR = { dc:0x0F6B5C, power:0xB3261E, industry:0x6B4A9A, tower:0x1B4FD8 };
+var TYPE_LABEL = { dc:"Data center", power:"Thermal power plant", industry:"Heavy industry", tower:"Mapped cooling tower" };
+
+var M = {
+  density:150, white:0.50, pue:1.40, evap:0.60, coc:5, area:100000,
+  wet:0.85, cf:1.0, ind:1.0
+};
+var MODE = {speckle:true, piece:true};
+var ON = {dc:true, power:true, industry:true, tower:true, drought:true};
+
+/* first paint while the live queries run */
+var SEED = [
+["Switch12","Switch","Clark","NV",378533,-115.213292,36.061739],
+["Switch Las Vegas 7","Switch","Clark","NV",324714,-115.210245,36.059925],
+["Switch Las Vegas 8","Switch","Clark","NV",264412,-115.214258,36.057834],
+["Switch Las Vegas 9","Switch","Clark","NV",286176,-115.219628,36.055708],
+["Switch Las Vegas 10","Switch","Clark","NV",206411,-115.223061,36.055586],
+["Google Henderson A","Google","Clark","NV",143869,-115.008577,36.056288],
+["Google Henderson B","Google","Clark","NV",141227,-115.008797,36.058802],
+["Reno Tahoe building 1","","Washoe","NV",276687,-119.548574,39.567105],
+["Apple Data Center Mesa","Apple","Maricopa","AZ",1338261,-111.604056,33.347019],
+["EdgeConneX PHX02","EdgeConneX","Maricopa","AZ",654105,-111.647530,33.352011],
+["Aligned Energy Data Center","Aligned","Maricopa","AZ",512814,-112.111168,33.659041],
+["Stream Data Centers PHX-1","Stream","Maricopa","AZ",413250,-112.359988,33.419491],
+["Digital Realty PHX15","Digital Realty","Maricopa","AZ",294678,-111.886626,33.274974],
+["Microsoft PHX-10","Microsoft","Maricopa","AZ",246184,-112.364830,33.407946],
+["CyrusOne PHX1","CyrusOne","Maricopa","AZ",137355,-111.881912,33.270855],
+["Digital Realty SC1","Digital Realty","Santa Clara","CA",297948,-121.943911,37.361687],
+["RagingWire CA2","NTT","Sacramento","CA",204702,-121.491946,38.650400],
+["RagingWire CA1","NTT","Sacramento","CA",192302,-121.489186,38.650432],
+["Hurricane Electric Fremont 2","Hurricane Electric","Alameda","CA",181268,-121.920311,37.471827],
+["Equinix SV5","Equinix","Santa Clara","CA",166314,-121.781839,37.242040],
+["Microsoft Santa Clara","Microsoft","Santa Clara","CA",166655,-121.946436,37.362066],
+["Serverfarm LAX1","Serverfarm","Los Angeles","CA",119102,-118.386436,33.921742],
+["DRT LAX12","Digital Realty","Los Angeles","CA",113310,-118.384630,33.915649],
+["One Wilshire","","Los Angeles","CA",43850,-118.255546,34.047892],
+["365 Main Street","Digital Realty","San Francisco","CA",39318,-122.390469,37.788731],
+["Facebook Altoona 4","Meta","Polk","IA",606958,-93.516399,41.667737],
+["Facebook Altoona 5","Meta","Polk","IA",628003,-93.516629,41.671173],
+["Facebook Fort Worth","Meta","Tarrant","TX",753193,-97.255460,32.988296],
+["QTS Fort Worth","Quality Technology Services","Tarrant","TX",277996,-97.259202,32.988855],
+["Equinix Infomart","Equinix","Dallas","TX",239835,-96.819511,32.800943],
+["Microsoft San Antonio","Microsoft","Bexar","TX",478642,-98.692608,29.479926],
+["Equinix New York NY2","Equinix","Hudson","NJ",402960,-74.075917,40.777420],
+["Lakeside Technology Center","","Cook","IL",129156,-87.618359,41.853653],
+["Digital Realty CH1","Digital Realty","Cook","IL",469756,-87.962172,41.994237],
+["Westin Building","Digital Realty","King","WA",13117,-122.338864,47.614355],
+["NAP of the Americas","","Miami-Dade","FL",122625,-80.193075,25.782379],
+["33 Thomas Street","","New York","NY",30791,-74.005913,40.716525],
+["Switch Atlanta","Switch","Douglas","GA",171499,-84.587269,33.755025],
+["NCAR Wyoming Supercomputing Center","University Corporation for Atmospheric Research","Laramie","WY",101129,-104.897487,41.128790],
+["NCSA Petascale Computing Facility","","Champaign","IL",45620,-88.242031,40.095259],
+["Cherokee Data Center","","Tulsa","OK",414827,-95.910031,36.262546]
+];
+
+/* ================= state ================= */
+
+var apiBase = "";
+var qp = new URLSearchParams(location.search).get("api");
+if(qp) apiBase = qp.trim();
+
+var scene, camera, renderer, raycaster;
+var mapGroup, droughtGroup, markerGroup, dotGroup, plumeGroup, highlight;
+var facilities = [], selected = null, currentScope = "us";
+var pickables = [], dotCloud = null, dotIndex = [];
+var stateFeatures = null, countyFeatures = null, countyLoading = false;
+var droughtFeatures = null, droughtStatus = "waiting";
+
+var cache = {};
+var status = { dc:"waiting", power:"waiting", industry:"waiting", tower:"waiting" };
+
+var PROJ_TX = 487.5, PROJ_TY = 305, WORLD = 10, DEPTH = 3.4;
+var projection = d3.geoAlbersUsa().scale(1300).translate([PROJ_TX, PROJ_TY]);
+
+function toWorld(lon, lat){
+  var p = projection([lon, lat]);
+  if(!p) return null;
+  return { x:(p[0]-PROJ_TX)/WORLD, z:(p[1]-PROJ_TY)/WORLD };
+}
+function setStatus(t){ document.getElementById("status").textContent = t; }
+function api(path){
+  if(!apiBase) return null;
+  return "https://" + apiBase.replace(/^https?:\/\//,"").replace(/\/+$/,"") + path;
+}
+function getJSON(url, opts){
+  return fetch(url, opts).then(function(r){
+    if(!r.ok) throw new Error(r.status);
+    return r.json();
+  });
+}
+function titleCase(s){
+  if(!s) return "";
+  return String(s).toLowerCase().replace(/\b[a-z]/g, function(c){ return c.toUpperCase(); })
+    .replace(/\s+County$/i, "").replace(/\s+Parish$/i, "");
+}
+function pool(tasks, n){
+  var i = 0, out = [];
+  function next(){
+    if(i >= tasks.length) return Promise.resolve();
+    var k = i++;
+    return tasks[k]().then(function(v){ out[k] = v; }, function(){ out[k] = null; }).then(next);
+  }
+  var runners = [];
+  for(var r=0;r<Math.min(n, tasks.length);r++) runners.push(next());
+  return Promise.all(runners).then(function(){ return out; });
+}
+
+/* ================= geography ================= */
+
+function prepFeatures(list){
+  list.forEach(function(f){
+    try { f._b = d3.geoBounds(f); } catch(e){ f._b = null; }
+  });
+  return list;
+}
+
+function locate(list, lon, lat){
+  if(!list) return null;
+  for(var i=0;i<list.length;i++){
+    var f = list[i], b = f._b;
+    if(b && (lon < b[0][0]-0.02 || lon > b[1][0]+0.02 || lat < b[0][1]-0.02 || lat > b[1][1]+0.02)) continue;
+    if(d3.geoContains(f, [lon, lat])) return f;
+  }
+  return null;
+}
+
+function assignState(f){
+  if(f.state) return;
+  var hit = locate(stateFeatures, f.lon, f.lat);
+  f.state = hit ? (FIPS[hit.id] || "") : "";
+}
+
+function assignCounties(list){
+  if(!countyFeatures) return;
+  list.forEach(function(f){
+    if(f.county) return;
+    var hit = locate(countyFeatures, f.lon, f.lat);
+    f.county = hit ? hit.properties.name : "";
+  });
+}
+
+function ensureCounties(){
+  if(countyFeatures || countyLoading) return;
+  countyLoading = true;
+  document.getElementById("countyhint").textContent = "Loading county boundaries";
+  getJSON(COUNTIES_URL).then(function(topo){
+    countyFeatures = prepFeatures(topojson.feature(topo, topo.objects.counties).features);
+    assignCounties(facilities);
+    renderReadouts();
+    document.getElementById("countyhint").textContent = "";
+  }).catch(function(){
+    document.getElementById("countyhint").textContent = "County boundaries did not load, so mapped data centers stay unassigned here.";
+  });
+}
+
+/* ================= source: data centers and cooling towers ================= */
+
+function overpassQuery(states){
+  var areas = states ? states.map(function(s){ return "US-"+s; }) : ["US"];
+  var q = "[out:json][timeout:300];";
+  areas.forEach(function(a,i){
+    var key = a === "US" ? "ISO3166-1" : "ISO3166-2";
+    q += 'area["'+key+'"="'+a+'"]->.a'+i+';';
+  });
+  q += "(";
+  areas.forEach(function(a,i){
+    ["telecom","building"].forEach(function(k){
+      q += 'node["'+k+'"="data_center"](area.a'+i+');';
+      q += 'way["'+k+'"="data_center"](area.a'+i+');';
+    });
+  });
+  q += ")->.dc;.dc out geom tags;(";
+  areas.forEach(function(a,i){
+    q += 'node["man_made"="cooling_tower"](area.a'+i+');';
+    q += 'way["man_made"="cooling_tower"](area.a'+i+');';
+  });
+  q += ")->.ct;.ct out center tags;";
+  return q;
+}
+
+function runOverpass(query){
+  var body = "data=" + encodeURIComponent(query);
+  var opts = { method:"POST", headers:{"Content-Type":"application/x-www-form-urlencoded"}, body:body };
+  return getJSON(OVERPASS[0], opts)
+    .catch(function(){ return getJSON(OVERPASS[1], opts); })
+    .catch(function(){ return getJSON(OVERPASS[2], opts); });
+}
+
+function polyArea(geom){
+  if(!geom || geom.length < 4) return null;
+  var midLat = 0;
+  geom.forEach(function(p){ midLat += p.lat; });
+  midLat /= geom.length;
+  var mx = 111320 * Math.cos(midLat*Math.PI/180), my = 111320, sum = 0;
+  for(var i=0;i<geom.length-1;i++){
+    var a = geom[i], b = geom[i+1];
+    sum += (a.lon*mx)*(b.lat*my) - (b.lon*mx)*(a.lat*my);
+  }
+  var m2 = Math.abs(sum/2);
+  return m2 > 40 ? m2 * 10.7639 : null;
+}
+
+function normaliseOverpass(raw){
+  var dc = [], tw = [], seen = {};
+  (raw.elements || []).forEach(function(e){
+    var t = e.tags || {};
+    var isDc = t.telecom === "data_center" || t.building === "data_center";
+    var isTw = t.man_made === "cooling_tower";
+    if(!isDc && !isTw) return;
+
+    var lat = null, lon = null, sqft = null;
+    if(e.type === "node"){ lat = e.lat; lon = e.lon; }
+    else if(e.geometry && e.geometry.length){
+      var la = 0, lo = 0;
+      e.geometry.forEach(function(p){ la += p.lat; lo += p.lon; });
+      lat = la/e.geometry.length; lon = lo/e.geometry.length;
+      if(isDc) sqft = polyArea(e.geometry);
+    } else if(e.center){ lat = e.center.lat; lon = e.center.lon; }
+    if(lat == null || lon == null) return;
+
+    var key = (isDc ? "d" : "t") + lat.toFixed(4) + "," + lon.toFixed(4);
+    if(seen[key]) return;
+    seen[key] = 1;
+
+    var rec = {
+      id:"osm/" + e.type + "/" + e.id,
+      name: t.name || t.operator || t.brand || (isDc ? "Unnamed data center" : "Cooling tower"),
+      operator: t.operator || t.brand || "",
+      state:"", county:"", lat:lat, lon:lon, sqft:sqft,
+      type: isDc ? "dc" : "tower",
+      height: t.height ? parseFloat(t.height) : null
+    };
+    if(isDc) dc.push(rec); else tw.push(rec);
+  });
+  return { dc:dc, tower:tw };
+}
+
+function loadOverpass(scope){
+  var url = api("/api/osm?scope=" + scope);
+  var job = url
+    ? getJSON(url).then(function(j){ return { dc:j.dc || [], tower:j.tower || [] }; })
+    : runOverpass(overpassQuery(SCOPES[scope].states)).then(normaliseOverpass);
+  return job.then(function(r){
+    r.dc.forEach(assignState);
+    r.tower.forEach(assignState);
+    return r;
+  });
+}
+
+/* ================= source: power plants ================= */
+
+function powerWhere(states){
+  var thermal = "(coal_mw>0 OR ng_mw>0 OR nuclear_mw>0 OR bio_mw>0 OR geo_mw>0 OR crude_mw>0)";
+  if(!states) return thermal;
+  var names = states.map(function(s){ return "'" + ABBR_TO_NAME[s].replace(/'/g,"''") + "'"; });
+  return "statename IN (" + names.join(",") + ") AND " + thermal;
+}
+
+function arcgisAll(layer, params){
+  var out = [];
+  function page(offset){
+    var p = new URLSearchParams(Object.assign({}, params, {
+      f:"json", resultOffset:String(offset), resultRecordCount:"2000"
+    }));
+    return getJSON(layer + "/query?" + p.toString()).then(function(j){
+      if(j.error) throw new Error(j.error.message || "query error");
+      var feats = j.features || [];
+      out = out.concat(feats);
+      if(feats.length === 2000 || j.exceededTransferLimit) return page(offset + feats.length);
+      return out;
+    });
+  }
+  return page(0);
+}
+
+function splitThermal(a){
+  var tech = (a.tech_desc || "") + " " + (a.source_des || "");
+  var parts = [];
+  function add(kind, mw){ if(mw > 0) parts.push({kind:kind, mw:mw}); }
+  add("nuclear", +a.nuclear_mw || 0);
+  add("coal", +a.coal_mw || 0);
+  var ng = +a.ng_mw || 0;
+  if(ng > 0){
+    if(/combined cycle/i.test(tech)) add("ngcc", ng);
+    else if(/steam turbine/i.test(tech)) add("gassteam", ng);
+  }
+  var oil = +a.crude_mw || 0;
+  if(oil > 0 && /steam turbine/i.test(tech)) add("gassteam", oil);
+  var bio = +a.bio_mw || 0;
+  if(bio > 0 && /wood|municipal solid waste|other waste biomass|steam/i.test(tech)) add("bio", bio);
+  add("geo", +a.geo_mw || 0);
+  return parts;
+}
+
+function normalisePower(feats){
+  var out = [];
+  feats.forEach(function(f){
+    var a = f.attributes || {};
+    var lat = +a.latitude, lon = +a.longitude;
+    if(!isFinite(lat) || !isFinite(lon)) return;
+    var parts = splitThermal(a);
+    if(!parts.length) return;
+    out.push({
+      id:"eia/" + a.plant_code,
+      name: a.plant_name || "Power plant",
+      operator: a.utility_na || "",
+      state: NAME_TO_ABBR[(a.statename || "").toLowerCase()] || "",
+      county: titleCase(a.county),
+      city: a.city || "",
+      lat:lat, lon:lon,
+      type:"power",
+      parts: parts,
+      totalMW: +a.total_mw || 0,
+      tech: a.tech_desc || "",
+      plantCode: a.plant_code
+    });
+  });
+  return out;
+}
+
+function loadPower(scope){
+  var url = api("/api/power?scope=" + scope);
+  if(url) return getJSON(url).then(function(j){ return j.facilities || []; });
+  return arcgisAll(POWER_LAYER, {
+    where: powerWhere(SCOPES[scope].states),
+    outFields: "plant_code,plant_name,utility_na,county,city,statename,primsource,total_mw,coal_mw,ng_mw,crude_mw,nuclear_mw,bio_mw,geo_mw,tech_desc,source_des,latitude,longitude",
+    returnGeometry: "false",
+    orderByFields: "fid"
+  }).then(normalisePower);
+}
+
+/* ================= source: heavy industry ================= */
+
+function classify(naics){
+  var s = String(naics || "");
+  for(var i=0;i<INDUSTRY.length;i++){
+    if(s.indexOf(INDUSTRY[i][0]) === 0) return INDUSTRY[i];
+  }
+  return null;
+}
+
+function lowerKeys(o){
+  var r = {};
+  Object.keys(o).forEach(function(k){ r[k.toLowerCase()] = o[k]; });
+  return r;
+}
+
+function normaliseGhg(rows){
+  var out = [], seen = {};
+  (rows || []).forEach(function(raw){
+    var r = lowerKeys(raw);
+    var cls = classify(r.naics_code);
+    if(!cls) return;
+    var lat = parseFloat(r.latitude), lon = parseFloat(r.longitude);
+    if(!isFinite(lat) || !isFinite(lon)) return;
+    var id = r.facility_id || (lat.toFixed(4) + lon.toFixed(4));
+    if(seen[id]) return;
+    seen[id] = 1;
+    out.push({
+      id:"ghg/" + id,
+      name: titleCase(r.facility_name) || cls[1],
+      operator: titleCase(r.parent_company || ""),
+      state: (r.state || "").toUpperCase(),
+      county: titleCase(r.county),
+      city: titleCase(r.city),
+      lat:lat, lon:lon,
+      type:"industry",
+      cls: cls[1],
+      typical: cls[2],
+      naics: r.naics_code,
+      year: r.year
+    });
+  });
+  return out;
+}
+
+function ghgState(st){
+  function yearTry(years){
+    if(!years.length) return Promise.resolve([]);
+    var y = years[0];
+    return getJSON(GHG_BASE + st + "/YEAR/=/" + y + "/JSON").then(function(rows){
+      if(!rows || !rows.length) return yearTry(years.slice(1));
+      return rows;
+    }).catch(function(e){
+      if(years.length > 1) return yearTry(years.slice(1));
+      throw e;
+    });
+  }
+  return yearTry([2024, 2023]);
+}
+
+function loadIndustry(scope){
+  var url = api("/api/industry?scope=" + scope);
+  if(url) return getJSON(url).then(function(j){ return j.facilities || []; });
+  var states = SCOPES[scope].states || ALL_STATES;
+  var failures = 0;
+  var tasks = states.map(function(st){
+    return function(){
+      return ghgState(st).catch(function(e){ failures++; throw e; });
+    };
+  });
+  return pool(tasks, 4).then(function(results){
+    if(failures === states.length) throw new Error("all refused");
+    var rows = [];
+    results.forEach(function(r){ if(r) rows = rows.concat(r); });
+    return normaliseGhg(rows);
+  });
+}
+
+/* ================= source: drought ================= */
+
+function ringSigned(r){
+  var s = 0;
+  for(var i=0;i<r.length-1;i++) s += (r[i+1][0]-r[i][0]) * (r[i+1][1]+r[i][1]);
+  return s;
+}
+
+function rewindForD3(feature){
+  var g = feature.geometry;
+  if(!g) return feature;
+  var polys = g.type === "Polygon" ? [g.coordinates] : g.coordinates;
+  polys.forEach(function(rings){
+    rings.forEach(function(ring, i){
+      var s = ringSigned(ring);
+      if(i === 0 && s < 0) ring.reverse();
+      if(i > 0 && s > 0) ring.reverse();
+    });
+  });
+  var minX=180, minY=90, maxX=-180, maxY=-90;
+  polys.forEach(function(rings){
+    rings[0].forEach(function(p){
+      if(p[0]<minX) minX=p[0]; if(p[0]>maxX) maxX=p[0];
+      if(p[1]<minY) minY=p[1]; if(p[1]>maxY) maxY=p[1];
+    });
+  });
+  feature._bb = [minX, minY, maxX, maxY];
+  return feature;
+}
+
+function loadDrought(){
+  var url = api("/api/drought");
+  var job = url ? getJSON(url) : getJSON(DROUGHT_LAYER + "/query?" + new URLSearchParams({
+    where:"1=1", outFields:"DM,MapDate", f:"geojson", outSR:"4326",
+    maxAllowableOffset:"0.03", geometryPrecision:"3"
+  }).toString());
+  return job.then(function(gj){
+    var feats = (gj.features || []).filter(function(f){ return f.geometry; });
+    feats.forEach(rewindForD3);
+    return feats;
+  });
+}
+
+function droughtAt(lon, lat){
+  if(!droughtFeatures) return -1;
+  var best = -1;
+  for(var i=0;i<droughtFeatures.length;i++){
+    var f = droughtFeatures[i], b = f._bb, dm = +f.properties.DM;
+    if(dm <= best) continue;
+    if(lon < b[0] || lon > b[2] || lat < b[1] || lat > b[3]) continue;
+    if(d3.geoContains(f, [lon, lat])) best = dm;
+  }
+  return best;
+}
+
+function tagDrought(list){
+  if(!droughtFeatures) return;
+  list.forEach(function(f){
+    if(f.dm === undefined) f.dm = droughtAt(f.lon, f.lat);
+  });
+}
+
+/* ================= estimates ================= */
+
+function estDc(f){
+  var sqft = f.sqft || M.area;
+  var itW = sqft * M.white * M.density;
+  var thermalW = itW * M.pue;
+  var evapGal = ((thermalW * M.evap / LATENT_HEAT) * 86400) / L_PER_GAL;
+  var intakeGal = evapGal * (M.coc/(M.coc-1));
+  return {
+    gal:evapGal, intake:intakeGal, blowdown:intakeGal-evapGal,
+    sqft:sqft, measured:!!f.sqft, itMW:itW/1e6, siteMW:thermalW/1e6
+  };
+}
+
+function estPower(f){
+  var gal = 0, mwh = 0, steamMW = 0, rows = [];
+  f.parts.forEach(function(p){
+    var t = THERMAL[p.kind];
+    var cf = Math.min(1, t.cf * M.cf);
+    var dayMWh = p.mw * cf * 24;
+    var g = dayMWh * t.gpm * (p.kind === "geo" ? 1 : M.wet);
+    gal += g; mwh += dayMWh;
+    if(p.kind !== "geo") steamMW += p.mw;
+    rows.push({label:t.label, mw:p.mw, gal:g});
+  });
+  return { gal:gal, intake:gal*1.25, blowdown:gal*0.25, mwh:mwh, steamMW:steamMW, rows:rows };
+}
+
+function estIndustry(f){
+  var gal = f.typical * M.ind;
+  return { gal:gal, intake:gal*1.6, blowdown:gal*0.6 };
+}
+
+function estimate(f){
+  if(f.type === "dc") return estDc(f);
+  if(f.type === "power") return estPower(f);
+  if(f.type === "industry") return estIndustry(f);
+  return { gal:0, intake:0, blowdown:0 };
+}
+
+/* ================= combine ================= */
+
+function seedRecords(){
+  return SEED.map(function(r,i){
+    return { id:"seed/"+i, name:r[0], operator:r[1], county:r[2], state:r[3],
+      sqft:r[4], lon:r[5], lat:r[6], type:"dc" };
+  });
+}
+
+function scopeHas(f){
+  var s = SCOPES[currentScope].states;
+  if(!s || !f.state) return true;
+  return s.indexOf(f.state) > -1;
+}
+
+function combine(){
+  var c = cache[currentScope] || {};
+  var list = [];
+  if(ON.dc) list = list.concat(c.dc || (status.dc === "loaded" ? [] : seedRecords()));
+  if(ON.power && c.power) list = list.concat(c.power);
+  if(ON.industry && c.industry) list = list.concat(c.industry);
+  if(ON.tower && c.tower) list = list.concat(c.tower);
+  facilities = list.filter(scopeHas);
+  facilities.forEach(function(f){ f.est = estimate(f); });
+  tagDrought(facilities);
+  assignCounties(facilities);
+  buildMarkers();
+  renderReadouts();
+}
+
+function loadScope(scope){
+  if(!cache[scope]) cache[scope] = {};
+  var c = cache[scope];
+  setStatus("Pulling every source for " + SCOPES[scope].label);
+
+  function track(key, job, after){
+    if(c[key]){ status[key] = "loaded"; return; }
+    status[key] = "loading";
+    renderLayerStatus();
+    job().then(function(list){
+      if(currentScope !== scope && cache[scope]){ after(list); return; }
+      after(list);
+      status[key] = "loaded";
+      combine();
+      renderLayerStatus();
+    }).catch(function(){
+      status[key] = "refused";
+      renderLayerStatus();
+      combine();
+    });
+  }
+
+  if(!c.dc || !c.tower){
+    status.dc = status.tower = "loading";
+    renderLayerStatus();
+    loadOverpass(scope).then(function(r){
+      c.dc = r.dc; c.tower = r.tower;
+      if(currentScope === scope){
+        status.dc = status.tower = "loaded";
+        combine(); renderLayerStatus();
+      }
+    }).catch(function(){
+      if(currentScope === scope){
+        status.dc = status.tower = "refused";
+        renderLayerStatus(); combine();
+      }
+    });
+  } else { status.dc = status.tower = "loaded"; }
+
+  if(!c.power){
+    status.power = "loading";
+    loadPower(scope).then(function(list){
+      c.power = list;
+      if(currentScope === scope){ status.power = "loaded"; combine(); renderLayerStatus(); }
+    }).catch(function(){
+      if(currentScope === scope){ status.power = "refused"; renderLayerStatus(); combine(); }
+    });
+  } else { status.power = "loaded"; }
+
+  if(!c.industry){
+    status.industry = "loading";
+    loadIndustry(scope).then(function(list){
+      c.industry = list;
+      if(currentScope === scope){ status.industry = "loaded"; combine(); renderLayerStatus(); }
+    }).catch(function(){
+      if(currentScope === scope){ status.industry = "refused"; renderLayerStatus(); combine(); }
+    });
+  } else { status.industry = "loaded"; }
+
+  renderLayerStatus();
+  combine();
+  ensureCounties();
+}
+
+/* ================= scene ================= */
+
+function initScene(){
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xEEF0EC);
+  scene.fog = new THREE.Fog(0xEEF0EC, 170, 360);
+
+  camera = new THREE.PerspectiveCamera(42, window.innerWidth/window.innerHeight, 0.5, 900);
+
+  renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.getElementById("stage").appendChild(renderer.domElement);
+
+  var key = new THREE.DirectionalLight(0xffffff, 0.78);
+  key.position.set(-60,110,70); scene.add(key);
+  var fill = new THREE.DirectionalLight(0xdfe8e4, 0.34);
+  fill.position.set(80,40,-60); scene.add(fill);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.56));
+
+  var table = new THREE.Mesh(new THREE.PlaneGeometry(1400,1400), new THREE.MeshBasicMaterial({color:0xE3E7E1}));
+  table.rotation.x = -Math.PI/2; table.position.y = -0.02; scene.add(table);
+
+  mapGroup = new THREE.Group(); scene.add(mapGroup);
+  droughtGroup = new THREE.Group(); scene.add(droughtGroup);
+  dotGroup = new THREE.Group(); scene.add(dotGroup);
+  markerGroup = new THREE.Group(); scene.add(markerGroup);
+  plumeGroup = new THREE.Group(); scene.add(plumeGroup);
+
+  highlight = new THREE.Mesh(
+    new THREE.RingGeometry(0.9, 1.18, 36),
+    new THREE.MeshBasicMaterial({color:0x1B4FD8, side:THREE.DoubleSide, transparent:true, opacity:0.95})
+  );
+  highlight.rotation.x = -Math.PI/2; highlight.visible = false; scene.add(highlight);
+
+  raycaster = new THREE.Raycaster();
+  raycaster.params.Points.threshold = 0.5;
+
+  window.addEventListener("resize", function(){
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+}
+
+var cam = { theta:0, phi:0.70, radius:140, target:new THREE.Vector3(0,0,2) };
+
+function applyCam(){
+  cam.phi = Math.max(0.16, Math.min(1.42, cam.phi));
+  cam.radius = Math.max(8, Math.min(320, cam.radius));
+  var s = Math.sin(cam.phi), c = Math.cos(cam.phi);
+  camera.position.set(
+    cam.target.x + cam.radius*s*Math.sin(cam.theta),
+    cam.target.y + cam.radius*c,
+    cam.target.z + cam.radius*s*Math.cos(cam.theta)
+  );
+  camera.lookAt(cam.target);
+}
+
+function initControls(){
+  var el = renderer.domElement, pts = {}, pinch = 0, moved = 0;
+  function dist(a,b){ var x=a.x-b.x, y=a.y-b.y; return Math.sqrt(x*x+y*y); }
+  function panBy(dx,dy){
+    var k = cam.radius*0.0012;
+    var fwd = new THREE.Vector3(Math.sin(cam.theta),0,Math.cos(cam.theta));
+    var right = new THREE.Vector3(fwd.z,0,-fwd.x);
+    cam.target.addScaledVector(right, dx*k);
+    cam.target.addScaledVector(fwd, -dy*k);
+  }
+  el.addEventListener("pointerdown", function(e){
+    el.setPointerCapture(e.pointerId);
+    pts[e.pointerId] = {x:e.clientX, y:e.clientY};
+    moved = 0;
+    var ids = Object.keys(pts);
+    if(ids.length === 2) pinch = dist(pts[ids[0]], pts[ids[1]]);
+  });
+  el.addEventListener("pointermove", function(e){
+    if(!pts[e.pointerId]) return;
+    var prev = pts[e.pointerId];
+    var dx = e.clientX-prev.x, dy = e.clientY-prev.y;
+    pts[e.pointerId] = {x:e.clientX, y:e.clientY};
+    moved += Math.abs(dx)+Math.abs(dy);
+    var ids = Object.keys(pts);
+    if(ids.length === 1){
+      cam.theta -= dx*0.0062; cam.phi -= dy*0.0052; applyCam();
+    } else if(ids.length === 2){
+      var d = dist(pts[ids[0]], pts[ids[1]]);
+      if(pinch > 0) cam.radius *= pinch/Math.max(d,1);
+      pinch = d;
+      panBy(dx*0.5, dy*0.5);
+      applyCam();
+    }
+  });
+  el.addEventListener("pointerup", function(e){
+    if(pts[e.pointerId] && moved < 9 && Object.keys(pts).length === 1) pick(e.clientX, e.clientY);
+    delete pts[e.pointerId];
+    if(Object.keys(pts).length < 2) pinch = 0;
+  });
+  el.addEventListener("pointercancel", function(e){ delete pts[e.pointerId]; pinch = 0; });
+  el.addEventListener("wheel", function(e){
+    e.preventDefault();
+    cam.radius *= (1 + Math.sign(e.deltaY)*0.11);
+    applyCam();
+  }, {passive:false});
+  applyCam();
+}
+
+/* ================= base map ================= */
+
+function buildMap(features){
+  var capNormal = new THREE.MeshLambertMaterial({color:0xE9E7DD});
+  var capFocus  = new THREE.MeshLambertMaterial({color:0xDCE4DA});
+  var side      = new THREE.MeshLambertMaterial({color:0xC2BCA8});
+  var edgeMat   = new THREE.LineBasicMaterial({color:0x2A332E});
+  var focusSet  = {"06":1,"04":1,"32":1};
+
+  features.forEach(function(f){
+    var shapes = featureShapes(f.geometry);
+    if(!shapes.length) return;
+    var geo = new THREE.ExtrudeGeometry(shapes, {depth:DEPTH, bevelEnabled:false, curveSegments:1});
+    geo.rotateX(-Math.PI/2);
+    mapGroup.add(new THREE.Mesh(geo, [focusSet[f.id] === 1 ? capFocus : capNormal, side]));
+    mapGroup.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo, 24), edgeMat));
+  });
+}
+
+function featureShapes(geometry){
+  var polys = geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates;
+  var out = [];
+  polys.forEach(function(rings){
+    var outer = ringToPath(rings[0]);
+    if(outer.length < 3) return;
+    var shape = new THREE.Shape();
+    shape.moveTo(outer[0][0], outer[0][1]);
+    for(var i=1;i<outer.length;i++) shape.lineTo(outer[i][0], outer[i][1]);
+    for(var r=1;r<rings.length;r++){
+      var hole = ringToPath(rings[r]);
+      if(hole.length < 3) continue;
+      var p = new THREE.Path();
+      p.moveTo(hole[0][0], hole[0][1]);
+      for(var j=1;j<hole.length;j++) p.lineTo(hole[j][0], hole[j][1]);
+      shape.holes.push(p);
+    }
+    out.push(shape);
+  });
+  return out;
+}
+
+function ringToPath(ring){
+  var pts = [];
+  for(var i=0;i<ring.length;i++){
+    var p = projection(ring[i]);
+    if(!p) continue;
+    pts.push([ (p[0]-PROJ_TX)/WORLD, (PROJ_TY-p[1])/WORLD ]);
+  }
+  return pts;
+}
+
+function buildDrought(){
+  clearGroup(droughtGroup);
+  if(!droughtFeatures || !ON.drought) return;
+  droughtFeatures.slice().sort(function(a,b){ return a.properties.DM - b.properties.DM; })
+  .forEach(function(f){
+    var dm = +f.properties.DM;
+    var shapes;
+    try { shapes = featureShapes(f.geometry); } catch(e){ return; }
+    if(!shapes.length) return;
+    var geo;
+    try { geo = new THREE.ShapeGeometry(shapes); } catch(e){ return; }
+    geo.rotateX(-Math.PI/2);
+    var mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color: DROUGHT_COLORS[dm] || DROUGHT_COLORS[0],
+      transparent:true, opacity:0.42, depthWrite:false, side:THREE.DoubleSide
+    }));
+    mesh.position.y = DEPTH + 0.015 + dm*0.004;
+    mesh.renderOrder = 1 + dm;
+    droughtGroup.add(mesh);
+  });
+}
+
+/* ================= markers ================= */
+
+function clearGroup(g){
+  while(g.children.length){
+    var c = g.children.pop();
+    if(c.geometry) c.geometry.dispose();
+  }
+}
+
+function norm(gal){
+  if(!gal || gal <= 0) return 0;
+  return Math.max(0, Math.min(1, (Math.log10(gal) - 4) / 4));
+}
+
+function rampColor(r, faded){
+  var c = new THREE.Color(0x0F6B5C).lerp(new THREE.Color(0xB3261E), Math.pow(r, 0.8));
+  if(faded) c.offsetHSL(0, -0.45, 0.10);
+  return c;
+}
+
+function towerProfile(){
+  var pts = [];
+  var prof = [[0.58,0],[0.50,0.2],[0.42,0.45],[0.37,0.68],[0.38,0.85],[0.42,1]];
+  prof.forEach(function(p){ pts.push(new THREE.Vector2(p[0], p[1])); });
+  return pts;
+}
+
+function dotTexture(){
+  var c = document.createElement("canvas");
+  c.width = c.height = 64;
+  var g = c.getContext("2d");
+  g.beginPath(); g.arc(32,32,26,0,Math.PI*2);
+  g.fillStyle = "#ffffff"; g.fill();
+  g.lineWidth = 6; g.strokeStyle = "#14201C"; g.stroke();
+  var t = new THREE.CanvasTexture(c);
+  t.needsUpdate = true;
+  return t;
+}
+var DOT_TEX = null;
+
+function inst(geo, mat, n){
+  var m = new THREE.InstancedMesh(geo, mat, n);
+  markerGroup.add(m);
+  return m;
+}
+
+function buildMarkers(){
+  clearGroup(markerGroup);
+  clearGroup(dotGroup);
+  pickables = []; dotCloud = null; dotIndex = [];
+
+  var placed = { dc:[], power:[], industry:[], tower:[] };
+  facilities.forEach(function(f){
+    f.world = toWorld(f.lon, f.lat);
+    if(f.world) placed[f.type].push(f);
+  });
+
+  var all = placed.dc.concat(placed.power, placed.industry, placed.tower);
+  if(MODE.speckle && all.length) buildDots(all);
+  if(MODE.piece){
+    if(placed.dc.length) buildDcPieces(placed.dc);
+    if(placed.power.length) buildPowerPieces(placed.power);
+    if(placed.industry.length) buildIndustryPieces(placed.industry);
+    if(placed.tower.length) buildTowerPieces(placed.tower);
+  }
+
+  var live = ["dc","power","industry"].some(function(k){ return status[k] === "loaded"; });
+  var blocked = ["dc","power","industry"].every(function(k){ return status[k] === "refused"; });
+  setStatus(blocked
+    ? "Starter set only. This window blocks the live sources, which load from the deployed address."
+    : !live && ["dc","power","industry"].some(function(k){ return status[k] === "loading"; })
+      ? "Starter set shown while the live sources load"
+      : all.length ? all.length + " sources placed. Tap one." : "Nothing to place in this area yet.");
+  document.getElementById("gripcount").textContent = all.length + " placed";
+}
+
+function buildDots(list){
+  if(!DOT_TEX) DOT_TEX = dotTexture();
+  dotIndex = list;
+  var pos = new Float32Array(list.length*3);
+  var col = new Float32Array(list.length*3);
+  var c = new THREE.Color();
+  list.forEach(function(f,i){
+    pos[i*3] = f.world.x; pos[i*3+1] = DEPTH+0.07; pos[i*3+2] = f.world.z;
+    c.setHex(TYPE_COLOR[f.type]);
+    col[i*3] = c.r; col[i*3+1] = c.g; col[i*3+2] = c.b;
+  });
+  var geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos,3));
+  geo.setAttribute("color", new THREE.BufferAttribute(col,3));
+  dotCloud = new THREE.Points(geo, new THREE.PointsMaterial({
+    size:0.95, map:DOT_TEX, vertexColors:true, sizeAttenuation:true,
+    transparent:true, alphaTest:0.4, depthWrite:false
+  }));
+  dotCloud.renderOrder = 10;
+  dotGroup.add(dotCloud);
+}
+
+var M4 = new THREE.Matrix4(), P = new THREE.Vector3(), Q = new THREE.Quaternion(), S = new THREE.Vector3();
+function place(mesh, i, x, y, z, sx, sy, sz){
+  P.set(x,y,z); Q.set(0,0,0,1); S.set(sx,sy,sz);
+  M4.compose(P,Q,S); mesh.setMatrixAt(i, M4);
+}
+function finish(meshes){
+  meshes.forEach(function(m){
+    m.instanceMatrix.needsUpdate = true;
+    if(m.instanceColor) m.instanceColor.needsUpdate = true;
+  });
+}
+
+function buildDcPieces(list){
+  var n = list.length;
+  var body = new THREE.BoxGeometry(0.86,1,0.86); body.translate(0,0.5,0);
+  var stack = new THREE.CylinderGeometry(0.17,0.27,1,12,1,true); stack.translate(0,0.5,0);
+  var pad  = inst(new THREE.CylinderGeometry(0.62,0.68,0.22,16), new THREE.MeshLambertMaterial({color:0x3A463F}), n);
+  var bod  = inst(body, new THREE.MeshLambertMaterial({color:0xffffff}), n);
+  var stk  = inst(stack, new THREE.MeshLambertMaterial({color:0xE4E2D8, side:THREE.DoubleSide}), n);
+  var puff = inst(new THREE.SphereGeometry(0.2,10,8), new THREE.MeshLambertMaterial({color:0xFBFBF8}), n);
+
+  list.forEach(function(f,i){
+    var w = f.world, r = norm(f.est.gal), h = 0.9 + 6.2*r;
+    place(pad, i, w.x, DEPTH, w.z, 1,1,1);
+    place(bod, i, w.x, DEPTH+0.2, w.z, 1,h,1);
+    place(stk, i, w.x+0.22, DEPTH+0.2+h, w.z-0.18, 1, h*0.3+0.4, 1);
+    place(puff, i, w.x+0.22, DEPTH+0.2+h+h*0.3+0.55, w.z-0.18, 1,1,1);
+    bod.setColorAt(i, rampColor(r, !f.est.measured));
+  });
+  finish([pad,bod,stk,puff]);
+  pickables.push({mesh:bod, list:list}, {mesh:pad, list:list});
+}
+
+function buildPowerPieces(list){
+  var n = list.length;
+  var lathe = new THREE.LatheGeometry(towerProfile(), 22);
+  var pad  = inst(new THREE.CylinderGeometry(0.95,1.0,0.22,20), new THREE.MeshLambertMaterial({color:0x3A463F}), n);
+  var twr  = inst(lathe, new THREE.MeshLambertMaterial({color:0xffffff, side:THREE.DoubleSide}), n);
+  var puff = inst(new THREE.SphereGeometry(0.5,12,10), new THREE.MeshLambertMaterial({color:0xFBFBF8}), n);
+
+  list.forEach(function(f,i){
+    var w = f.world, r = norm(f.est.gal), h = 1.0 + 7.0*r;
+    var wide = 1.15 + 0.6*r;
+    place(pad, i, w.x, DEPTH, w.z, 1,1,1);
+    place(twr, i, w.x, DEPTH+0.2, w.z, wide, h, wide);
+    var ps = f.est.gal > 0 ? 0.7 + 1.1*r : 0.0001;
+    place(puff, i, w.x, DEPTH+0.2+h+0.35*ps, w.z, ps, ps*0.8, ps);
+    twr.setColorAt(i, rampColor(r, false));
+  });
+  finish([pad,twr,puff]);
+  pickables.push({mesh:twr, list:list}, {mesh:pad, list:list});
+}
+
+function buildIndustryPieces(list){
+  var n = list.length;
+  var base = new THREE.BoxGeometry(1.2,1,0.82); base.translate(0,0.5,0);
+  var chim = new THREE.CylinderGeometry(0.11,0.15,1,10); chim.translate(0,0.5,0);
+  var pad  = inst(new THREE.BoxGeometry(1.45,0.22,1.05), new THREE.MeshLambertMaterial({color:0x3A463F}), n);
+  var bas  = inst(base, new THREE.MeshLambertMaterial({color:0xffffff}), n);
+  var chm  = inst(chim, new THREE.MeshLambertMaterial({color:0x5A4E6E}), n);
+  var puff = inst(new THREE.SphereGeometry(0.24,10,8), new THREE.MeshLambertMaterial({color:0xFBFBF8}), n);
+
+  list.forEach(function(f,i){
+    var w = f.world, r = norm(f.est.gal), h = 1.0 + 6.4*r;
+    place(pad, i, w.x, DEPTH+0.11, w.z, 1,1,1);
+    place(bas, i, w.x, DEPTH+0.22, w.z, 1, 0.45 + h*0.28, 1);
+    place(chm, i, w.x+0.38, DEPTH+0.22, w.z+0.12, 1, h, 1);
+    place(puff, i, w.x+0.38, DEPTH+0.22+h+0.22, w.z+0.12, 1,1,1);
+    bas.setColorAt(i, rampColor(r, false));
+  });
+  finish([pad,bas,chm,puff]);
+  pickables.push({mesh:bas, list:list}, {mesh:chm, list:list}, {mesh:pad, list:list});
+}
+
+function buildTowerPieces(list){
+  var n = list.length;
+  var twr = inst(new THREE.LatheGeometry(towerProfile(), 16),
+    new THREE.MeshLambertMaterial({color:0xD9E2F4, side:THREE.DoubleSide}), n);
+  list.forEach(function(f,i){
+    place(twr, i, f.world.x, DEPTH, f.world.z, 0.42, 1.1, 0.42);
+  });
+  finish([twr]);
+  pickables.push({mesh:twr, list:list});
+}
+
+/* ================= picking ================= */
+
+function pick(cx, cy){
+  var v = new THREE.Vector2((cx/window.innerWidth)*2-1, -(cy/window.innerHeight)*2+1);
+  raycaster.setFromCamera(v, camera);
+  var best = null;
+  pickables.forEach(function(p){
+    var hits = raycaster.intersectObject(p.mesh, false);
+    if(hits.length && hits[0].instanceId != null){
+      if(!best || hits[0].distance < best.d) best = {d:hits[0].distance, f:p.list[hits[0].instanceId]};
+    }
+  });
+  if(best){ showSelection(best.f); return; }
+  if(dotCloud){
+    var dh = raycaster.intersectObject(dotCloud, false);
+    if(dh.length && dh[0].index != null) showSelection(dotIndex[dh[0].index]);
+  }
+}
+
+function tr(a,b){ return "<tr><td>"+a+"</td><td>"+b+"</td></tr>"; }
+function fmt(n,d){
+  if(!isFinite(n)) return "0";
+  return n.toLocaleString(undefined, {minimumFractionDigits:d||0, maximumFractionDigits:d||0});
+}
+function acreFeet(galDay){ return galDay*365/325851; }
+function esc(s){
+  return String(s == null ? "" : s).replace(/[&<>"]/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];
+  });
+}
+
+function showSelection(f){
+  if(!f || !f.world) return;
+  selected = f;
+  highlight.position.set(f.world.x, DEPTH+0.05, f.world.z);
+  highlight.visible = true;
+
+  var kind = document.getElementById("selkind");
+  kind.textContent = f.type === "industry" ? f.cls : TYPE_LABEL[f.type];
+  kind.style.color = "#" + new THREE.Color(TYPE_COLOR[f.type]).getHexString();
+
+  document.getElementById("selname").textContent = f.name;
+  document.getElementById("selop").textContent =
+    [f.operator, f.city, f.county, f.state].filter(Boolean).join(", ") ||
+    (f.lat.toFixed(4) + ", " + f.lon.toFixed(4));
+
+  var e = f.est, rows = [];
+  if(f.type === "dc"){
+    rows.push(
+      tr("Roof area", fmt(e.sqft) + " sq ft" + (e.measured ? ", measured" : ", assumed")),
+      tr("Computing load", e.itMW.toFixed(1) + " MW"),
+      tr("Whole site draw", e.siteMW.toFixed(1) + " MW")
+    );
+  } else if(f.type === "power"){
+    rows.push(tr("Nameplate, all units", fmt(f.totalMW) + " MW"));
+    e.rows.forEach(function(r){
+      rows.push(tr(esc(r.label), fmt(r.mw) + " MW, " + fmt(r.gal) + " gal"));
+    });
+    rows.push(tr("Generation per day", fmt(e.mwh) + " MWh"));
+    if(f.parts.some(function(p){ return p.kind === "geo"; })){
+      rows.push(tr("Geothermal steam", "reservoir fluid, not counted"));
+    }
+    rows.push(tr("Prime movers", esc(f.tech).slice(0,80)));
+  } else if(f.type === "industry"){
+    rows.push(
+      tr("Industry code", esc(f.naics)),
+      tr("Class typical", fmt(f.typical) + " gal"),
+      tr("Register year", esc(f.year))
+    );
+  } else {
+    rows.push(
+      tr("Structure", "mapped cooling tower"),
+      tr("Mapped height", f.height ? fmt(f.height) + " m" : "not recorded"),
+      tr("Water", "counted at its plant")
+    );
+  }
+
+  if(f.type !== "tower"){
+    rows.push(
+      tr("Evaporated per day", fmt(e.gal) + " gal"),
+      tr("Blowdown or discharge", fmt(e.blowdown) + " gal"),
+      tr("Total intake per day", fmt(e.intake) + " gal"),
+      tr("Consumed per year", fmt(acreFeet(e.gal), 1) + " acre feet")
+    );
+  }
+  rows.push(tr("Drought here", f.dm >= 0 ? DROUGHT_NAMES[f.dm] : (droughtFeatures ? "none" : "loading")));
+  rows.push(tr("Position", f.lat.toFixed(4) + ", " + f.lon.toFixed(4)));
+
+  document.getElementById("seltable").innerHTML = rows.join("");
+  document.getElementById("plumehint").textContent = "";
+  openPanel(true);
+}
+
+/* ================= readouts ================= */
+
+function counted(){
+  return facilities.filter(function(f){ return f.world && f.type !== "tower" && f.est; });
+}
+
+function renderLayerStatus(){
+  var c = cache[currentScope] || {};
+  function line(key, label){
+    var s = status[key];
+    var n = c[key] ? c[key].filter(scopeHas).length : 0;
+    var txt = s === "loaded" ? fmt(n) + " found" :
+              s === "loading" ? "loading" :
+              s === "refused" ? (key === "industry" ? "refused, needs backend" : "refused, retry area") : "waiting";
+    return tr(label, txt);
+  }
+  document.getElementById("layerstatus").innerHTML = [
+    line("dc","Data centers"),
+    line("power","Thermal power plants"),
+    line("industry","Heavy industry"),
+    line("tower","Mapped cooling towers"),
+    tr("Drought monitor", droughtStatus)
+  ].join("");
+}
+
+function renderReadouts(){
+  var list = counted();
+  var by = { dc:{n:0,g:0}, power:{n:0,g:0}, industry:{n:0,g:0} };
+  var total = 0, intake = 0;
+  list.forEach(function(f){
+    by[f.type].n++; by[f.type].g += f.est.gal;
+    total += f.est.gal; intake += f.est.intake;
+  });
+  var towers = facilities.filter(function(f){ return f.type === "tower" && f.world; }).length;
+
+  document.getElementById("totals").innerHTML = [
+    tr("Data centers, " + fmt(by.dc.n), fmt(by.dc.g) + " gal"),
+    tr("Thermal plants, " + fmt(by.power.n), fmt(by.power.g) + " gal"),
+    tr("Heavy industry, " + fmt(by.industry.n), fmt(by.industry.g) + " gal"),
+    tr("Evaporated per day, all", fmt(total) + " gal"),
+    tr("Total intake per day", fmt(intake) + " gal"),
+    tr("Consumed per year", fmt(acreFeet(total)) + " acre feet"),
+    tr("Same as households", fmt(total/300)),
+    tr("Mapped cooling towers", fmt(towers))
+  ].join("");
+
+  if(!droughtFeatures){
+    document.getElementById("droughttotals").innerHTML = tr("Drought layer", droughtStatus);
+  } else {
+    var lv = [0,0,0,0,0], ln = [0,0,0,0,0], none = 0;
+    list.forEach(function(f){
+      if(f.dm >= 0){ lv[f.dm] += f.est.gal; ln[f.dm]++; } else none += f.est.gal;
+    });
+    var rows = [];
+    for(var d=4; d>=0; d--){
+      if(ln[d]) rows.push(tr(DROUGHT_NAMES[d] + ", " + fmt(ln[d]), fmt(lv[d]) + " gal"));
+    }
+    var severe = lv[2]+lv[3]+lv[4];
+    rows.push(tr("Severe or worse, share of all", total ? fmt(severe/total*100) + " percent" : "none"));
+    rows.push(tr("Outside drought", fmt(none) + " gal"));
+    document.getElementById("droughttotals").innerHTML = rows.join("");
+  }
+
+  var top = list.slice().sort(function(a,b){ return b.est.gal - a.est.gal; }).slice(0,12);
+  document.getElementById("toplist").innerHTML = top.map(function(f){
+    var tag = f.type === "dc" ? "data center" : f.type === "power" ? "power" : (f.cls || "industry").toLowerCase();
+    return tr(esc(f.name).slice(0,30) + " <span style='opacity:.7'>" + esc(tag) + "</span>", fmt(f.est.gal) + " gal");
+  }).join("") || tr("Nothing here","");
+
+  var agg = {};
+  list.forEach(function(f){
+    if(!f.county) return;
+    var k = f.county + (f.state ? ", " + f.state : "");
+    if(!agg[k]) agg[k] = {g:0, n:0};
+    agg[k].g += f.est.gal; agg[k].n++;
+  });
+  var cr = Object.keys(agg).map(function(k){ return [k, agg[k]]; })
+    .sort(function(a,b){ return b[1].g - a[1].g; }).slice(0,12);
+  document.getElementById("counties").innerHTML =
+    cr.map(function(r){ return tr(esc(r[0]) + " (" + r[1].n + ")", fmt(r[1].g) + " gal"); }).join("") ||
+    tr("Waiting on county boundaries","");
+
+  var ops = {};
+  list.forEach(function(f){
+    var k = f.operator || "Unattributed";
+    if(!ops[k]) ops[k] = {n:0, g:0};
+    ops[k].n++; ops[k].g += f.est.gal;
+  });
+  var or = Object.keys(ops).map(function(k){ return [k, ops[k]]; })
+    .sort(function(a,b){ return b[1].g - a[1].g; }).slice(0,12);
+  document.getElementById("operators").innerHTML =
+    or.map(function(r){ return tr(esc(r[0]).slice(0,30) + " (" + r[1].n + ")", fmt(r[1].g) + " gal"); }).join("") ||
+    tr("Nothing here","");
+}
+
+function drawLegend(){
+  var el = document.getElementById("legend");
+  el.innerHTML = "";
+  for(var i=0;i<14;i++){
+    var r = i/13, c = rampColor(r, false);
+    var b = document.createElement("i");
+    b.style.height = (8 + 34*r) + "px";
+    b.style.background = "#" + c.getHexString();
+    el.appendChild(b);
+  }
+  var dk = document.getElementById("droughtkey");
+  dk.innerHTML = DROUGHT_NAMES.map(function(n,i){
+    return "<span><i class='dsw' style='background:#" + new THREE.Color(DROUGHT_COLORS[i]).getHexString() + "'></i>" + n + "</span>";
+  }).join("");
+}
+
+/* ================= plume ================= */
+
+function tracePlume(){
+  if(!selected) return;
+  var f = selected;
+  document.getElementById("plumehint").textContent = "Reading the wind field above the site";
+  var url = api("/api/plume?lat=" + f.lat + "&lon=" + f.lon + "&hours=48");
+  var job = url
+    ? getJSON(url).then(function(j){ return j.track; })
+    : clientTrack(f.lat, f.lon, 48, 3);
+  job.then(drawPlume).catch(function(){
+    document.getElementById("plumehint").textContent = "The wind service did not answer. Tap again in a moment.";
+  });
+}
+
+function clientTrack(lat, lon, hours, stepH){
+  var track = [{t:0, lat:lat, lon:lon}];
+  var elapsed = 0, chain = Promise.resolve();
+  for(var s=0;s<Math.floor(hours/stepH);s++){
+    chain = chain.then(function(){
+      var last = track[track.length-1];
+      return windAt(last.lat, last.lon, elapsed).then(function(w){
+        if(!w) return;
+        var toward = (w.dir+180)*Math.PI/180;
+        var ms = w.speed/3.6, dt = stepH*3600;
+        var dLat = (ms*Math.cos(toward)*dt)/111320;
+        var dLon = (ms*Math.sin(toward)*dt)/(111320*Math.cos(last.lat*Math.PI/180));
+        elapsed += stepH;
+        track.push({t:elapsed, lat:last.lat+dLat, lon:last.lon+dLon, speed:w.speed, dir:w.dir});
+      });
+    });
+  }
+  return chain.then(function(){ return track; });
+}
+
+function windAt(lat, lon, hourOffset){
+  var u = METEO + "?latitude=" + lat.toFixed(3) + "&longitude=" + lon.toFixed(3) +
+          "&hourly=wind_speed_850hPa,wind_direction_850hPa&forecast_days=3&timezone=UTC";
+  return getJSON(u).then(function(j){
+    if(!j.hourly) return null;
+    var now = new Date();
+    var base = j.hourly.time.findIndex(function(t){ return new Date(t+"Z") >= now; });
+    if(base < 0) base = 0;
+    var i = Math.min(base+hourOffset, j.hourly.time.length-1);
+    var sp = j.hourly.wind_speed_850hPa[i], dr = j.hourly.wind_direction_850hPa[i];
+    if(sp == null || dr == null) return null;
+    return {speed:sp, dir:dr};
+  }).catch(function(){ return null; });
+}
+
+function drawPlume(track){
+  clearGroup(plumeGroup);
+  if(!track || track.length < 2){
+    document.getElementById("plumehint").textContent = "No usable wind data at this point.";
+    return;
+  }
+  var pts = [];
+  track.forEach(function(p,i){
+    var w = toWorld(p.lon, p.lat);
+    if(!w) return;
+    pts.push(new THREE.Vector3(w.x, DEPTH+2.6+i*0.16, w.z));
+  });
+  if(pts.length < 2){
+    document.getElementById("plumehint").textContent = "The parcel leaves the mapped area within the first few hours.";
+    return;
+  }
+  var curve = new THREE.CatmullRomCurve3(pts);
+  var r = selected && selected.est ? 0.22 + 0.5*norm(selected.est.gal) : 0.3;
+  plumeGroup.add(new THREE.Mesh(
+    new THREE.TubeGeometry(curve, Math.max(20, pts.length*4), r, 8, false),
+    new THREE.MeshLambertMaterial({color:0x1B4FD8, transparent:true, opacity:0.55})
+  ));
+  var tail = new THREE.Mesh(
+    new THREE.SphereGeometry(r*2.2,14,10),
+    new THREE.MeshLambertMaterial({color:0x1B4FD8, transparent:true, opacity:0.4})
+  );
+  tail.position.copy(pts[pts.length-1]);
+  plumeGroup.add(tail);
+
+  var last = track[track.length-1];
+  var km = haversine(selected.lat, selected.lon, last.lat, last.lon);
+  var landing = droughtAt(last.lon, last.lat);
+  document.getElementById("plumehint").textContent =
+    "Forty eight hours downwind the parcel sits near " + last.lat.toFixed(2) + ", " + last.lon.toFixed(2) +
+    ", about " + fmt(km) + " kilometres out" +
+    (droughtFeatures ? (landing >= 0 ? ", over ground rated " + DROUGHT_NAMES[landing].toLowerCase() : ", over ground outside drought") : "") +
+    ". It rains where terrain or a front lifts it, somewhere along that line rather than at the end of it.";
+}
+
+function haversine(a1,o1,a2,o2){
+  var R=6371, t=Math.PI/180;
+  var dA=(a2-a1)*t, dO=(o2-o1)*t;
+  var x=Math.sin(dA/2)*Math.sin(dA/2)+Math.cos(a1*t)*Math.cos(a2*t)*Math.sin(dO/2)*Math.sin(dO/2);
+  return R*2*Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
+}
+
+function clearPlume(){
+  clearGroup(plumeGroup);
+  highlight.visible = false;
+  selected = null;
+  document.getElementById("sel").classList.remove("show");
+}
+
+/* ================= panel ================= */
+
+function openPanel(v){
+  document.getElementById("panel").classList.toggle("open", v);
+  document.getElementById("grip").setAttribute("aria-expanded", v ? "true" : "false");
+}
+
+function initPanel(){
+  var grip = document.getElementById("grip");
+  grip.addEventListener("click", function(){
+    openPanel(!document.getElementById("panel").classList.contains("open"));
+  });
+  grip.addEventListener("keydown", function(e){
+    if(e.key === "Enter" || e.key === " "){ e.preventDefault(); grip.click(); }
+  });
+
+  document.querySelectorAll("[data-scope]").forEach(function(b){
+    b.addEventListener("click", function(){
+      document.querySelectorAll("[data-scope]").forEach(function(x){ x.classList.remove("on"); });
+      b.classList.add("on");
+      currentScope = b.getAttribute("data-scope");
+      document.getElementById("scope").textContent = SCOPES[currentScope].label;
+      clearPlume();
+      loadScope(currentScope);
+    });
+  });
+
+  document.querySelectorAll("[data-src]").forEach(function(b){
+    b.addEventListener("click", function(){
+      var k = b.getAttribute("data-src");
+      ON[k] = !ON[k];
+      b.classList.toggle("on", ON[k]);
+      clearPlume();
+      if(k === "drought") buildDrought(); else combine();
+    });
+  });
+
+  document.querySelectorAll("[data-mode]").forEach(function(b){
+    b.addEventListener("click", function(){
+      var k = b.getAttribute("data-mode");
+      MODE[k] = !MODE[k];
+      b.classList.toggle("on", MODE[k]);
+      clearPlume();
+      buildMarkers();
+    });
+  });
+
+  document.querySelectorAll(".slider").forEach(function(s){
+    var k = s.getAttribute("data-k");
+    var inp = s.querySelector("input"), out = s.querySelector("var");
+    function render(){
+      var v = parseFloat(inp.value);
+      if(k === "density"){ M.density = v; out.textContent = v + " W per sq ft"; }
+      if(k === "white"){ M.white = v/100; out.textContent = v + " percent"; }
+      if(k === "pue"){ M.pue = v/100; out.textContent = (v/100).toFixed(2); }
+      if(k === "evap"){ M.evap = v/100; out.textContent = v + " percent"; }
+      if(k === "coc"){ M.coc = v; out.textContent = v + " passes"; }
+      if(k === "area"){ M.area = v*1000; out.textContent = v + ",000 sq ft"; }
+      if(k === "wet"){ M.wet = v/100; out.textContent = v + " percent"; }
+      if(k === "cf"){ M.cf = v/100; out.textContent = v + " percent"; }
+      if(k === "ind"){ M.ind = v/100; out.textContent = v + " percent"; }
+    }
+    render();
+    inp.addEventListener("input", render);
+    inp.addEventListener("change", function(){
+      render();
+      var keep = selected;
+      combine();
+      if(keep && keep.est) showSelection(keep);
+    });
+  });
+
+  document.getElementById("btnplume").addEventListener("click", tracePlume);
+  document.getElementById("btnclear").addEventListener("click", clearPlume);
+
+  var ab = document.getElementById("apibase");
+  ab.value = apiBase;
+  ab.addEventListener("change", function(){
+    apiBase = ab.value.trim();
+    cache = {};
+    droughtFeatures = null;
+    startDrought();
+    loadScope(currentScope);
+    loadSatellite();
+  });
+
+  loadSatellite();
+  setInterval(loadSatellite, 300000);
+}
+
+function loadSatellite(){
+  var img = document.getElementById("sat");
+  var url = api("/api/satellite") || SAT;
+  img.src = url + (url.indexOf("?") > -1 ? "&" : "?") + "t=" + Date.now();
+  document.getElementById("sattime").textContent =
+    "Updated " + new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+}
+
+function startDrought(){
+  droughtStatus = "loading";
+  renderLayerStatus();
+  loadDrought().then(function(feats){
+    droughtFeatures = feats;
+    var md = feats.length && feats[0].properties.MapDate;
+    droughtStatus = md ? "week of " + new Date(md).toLocaleDateString([], {month:"short", day:"numeric"}) : "loaded";
+    buildDrought();
+    Object.keys(cache).forEach(function(s){
+      ["dc","power","industry","tower"].forEach(function(k){
+        (cache[s][k] || []).forEach(function(f){ delete f.dm; });
+      });
+    });
+    combine();
+    renderLayerStatus();
+  }).catch(function(){
+    droughtStatus = "refused";
+    renderLayerStatus();
+    renderReadouts();
+  });
+}
+
+/* ================= boot ================= */
+
+function animate(){
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+}
+
+initScene();
+initControls();
+initPanel();
+drawLegend();
+animate();
+
+getJSON(STATES_URL).then(function(topo){
+  var feats = topojson.feature(topo, topo.objects.states).features;
+  buildMap(feats);
+  stateFeatures = prepFeatures(feats);
+  feats.forEach(function(f){
+    var ab = FIPS[f.id];
+    if(ab){ NAME_TO_ABBR[f.properties.name.toLowerCase()] = ab; ABBR_TO_NAME[ab] = f.properties.name; }
+  });
+  startDrought();
+  loadScope(currentScope);
+}).catch(function(){
+  setStatus("The base map geometry did not load. Check the network and reload.");
+});
+
+})();
+</script>
+</body>
+</html>
