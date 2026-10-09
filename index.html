@@ -24,7 +24,7 @@ canvas{display:block;touch-action:none}
 #masthead h1{margin:0;font-size:19px;font-weight:650;letter-spacing:-.02em}
 #masthead span{font-size:12.5px;color:var(--ink-soft)}
 
-#panel{position:fixed;left:0;right:0;bottom:0;max-height:66vh;background:var(--white);
+#panel{position:fixed;left:0;right:0;bottom:0;max-height:52vh;background:var(--white);
   border-top:1px solid var(--rule);z-index:6;display:flex;flex-direction:column;
   transform:translateY(calc(100% - 52px));transition:transform .28s cubic-bezier(.2,.7,.2,1)}
 #panel.open{transform:translateY(0)}
@@ -300,7 +300,8 @@ var POWER_LAYER   = "https://geo.epa.ohio.gov/arcgis/rest/services/Hosted/PowerP
 var DROUGHT_LAYER = "https://services5.arcgis.com/0OTVzJS4K09zlixn/arcgis/rest/services/USDM_current/FeatureServer/0";
 var GHG_BASE      = "https://data.epa.gov/efservice/PUB_DIM_FACILITY/STATE/=/";
 var METEO = "https://api.open-meteo.com/v1/forecast";
-var SAT   = "https://cdn.star.nesdis.noaa.gov/GOES18/ABI/CONUS/GEOCOLOR/1250x750.jpg";
+var SAT_WEST = "https://cdn.star.nesdis.noaa.gov/GOES18/ABI/CONUS/GEOCOLOR/1250x750.jpg";
+var SAT_EAST = "https://cdn.star.nesdis.noaa.gov/GOES19/ABI/CONUS/GEOCOLOR/1250x750.jpg";
 
 var FIPS = {
   "01":"AL","02":"AK","04":"AZ","05":"AR","06":"CA","08":"CO","09":"CT","10":"DE",
@@ -1052,6 +1053,7 @@ function initControls(){
     var dx = e.clientX-prev.x, dy = e.clientY-prev.y;
     pts[e.pointerId] = {x:e.clientX, y:e.clientY};
     moved += Math.abs(dx)+Math.abs(dy);
+    if(moved > 12 && document.getElementById("panel").classList.contains("open") && window.innerWidth < 820) openPanel(false);
     var ids = Object.keys(pts);
     if(ids.length === 1){
       cam.theta -= dx*0.0062; cam.phi -= dy*0.0052; applyCam();
@@ -1664,6 +1666,7 @@ function initPanel(){
       document.getElementById("scope").textContent = SCOPES[currentScope].label;
       clearPlume();
       loadScope(currentScope);
+      loadSatellite();
     });
   });
 
@@ -1732,9 +1735,11 @@ function initPanel(){
 
 function loadSatellite(){
   var img = document.getElementById("sat");
-  var url = api("/api/satellite") || SAT;
+  var east = currentScope === "us";
+  var url = api("/api/satellite?view=" + (east ? "east" : "west")) || (east ? SAT_EAST : SAT_WEST);
   img.src = url + (url.indexOf("?") > -1 ? "&" : "?") + "t=" + Date.now();
   document.getElementById("sattime").textContent =
+    (east ? "Eastern satellite, whole country view. " : "Western satellite, Pacific and western states view. ") +
     "Updated " + new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
 }
 

@@ -14,7 +14,10 @@ const POWER_LAYER = "https://geo.epa.ohio.gov/arcgis/rest/services/Hosted/PowerP
 const DROUGHT_LAYER = "https://services5.arcgis.com/0OTVzJS4K09zlixn/arcgis/rest/services/USDM_current/FeatureServer/0";
 const GHG_BASE = "https://data.epa.gov/efservice/PUB_DIM_FACILITY/STATE/=/";
 const METEO = "https://api.open-meteo.com/v1/forecast";
-const SAT = "https://cdn.star.nesdis.noaa.gov/GOES18/ABI/CONUS/GEOCOLOR/1250x750.jpg";
+const SAT = {
+  west: "https://cdn.star.nesdis.noaa.gov/GOES18/ABI/CONUS/GEOCOLOR/1250x750.jpg",
+  east: "https://cdn.star.nesdis.noaa.gov/GOES19/ABI/CONUS/GEOCOLOR/1250x750.jpg"
+};
 
 const DAY = 60 * 60 * 24;
 const TTL = { osm: DAY, power: DAY * 7, industry: DAY * 7, drought: 60 * 60 * 6, plume: 60 * 60 };
@@ -516,7 +519,7 @@ app.get("/api/plume", async (req, res) => {
 
 app.get("/api/satellite", async (req, res) => {
   try {
-    const upstream = await fetch(SAT);
+    const upstream = await fetch(req.query.view === "east" ? SAT.east : SAT.west);
     if (!upstream.ok) throw new Error("status " + upstream.status);
     const buf = Buffer.from(await upstream.arrayBuffer());
     res.set("Content-Type", "image/jpeg");
