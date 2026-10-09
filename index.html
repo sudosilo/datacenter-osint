@@ -151,6 +151,8 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;background
         <button class="chip on" data-src="industry"><i class="sw" style="background:var(--t-ind)"></i>Heavy industry</button>
         <button class="chip on" data-src="tower"><i class="sw" style="background:var(--t-tower)"></i>Mapped cooling towers</button>
         <button class="chip on" data-src="drought"><i class="dsw" style="background:#E8913A"></i>Drought</button>
+        <button class="chip on" data-sky="sat"><i class="dsw" style="background:#7E8F9C"></i>Satellite on map</button>
+        <button class="chip on" data-sky="wind"><i class="sw" style="background:#4C7BE8"></i>Wind flow</button>
       </div>
       <div class="row">
         <button class="chip on" data-mode="speckle">Pen dots</button>
@@ -184,6 +186,33 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;background
     <div class="sect">
       <h2>Owners and operators</h2>
       <table class="readout" id="operators"></table>
+    </div>
+
+    <div class="sect">
+      <h2>Sky over the map</h2>
+      <p>Live geostationary imagery is pulled as a flat latitude and longitude mosaic, reprojected pixel by pixel onto the same projection as the map, and laid across the top of every state. Wind at the plume level streams over it as moving trails.</p>
+      <div class="row">
+        <button class="chip on" data-img="color">True color</button>
+        <button class="chip" data-img="vapor">Water vapor</button>
+        <button class="chip" data-img="ir">Infrared</button>
+      </div>
+      <div class="slider" data-k="satop">
+        <div class="head"><b>Imagery strength</b><var></var></div>
+        <input type="range" min="10" max="100" step="1" value="85">
+      </div>
+      <div class="row" style="margin-top:4px">
+        <button class="chip" id="btnloop">Play the last day</button>
+        <button class="chip" id="btnnow">Latest image</button>
+      </div>
+      <div class="hint" id="skyhint">Waiting on imagery</div>
+      <div class="sub">Wind trails</div>
+      <div class="row">
+        <button class="chip on" data-level="850hPa">Plume level</button>
+        <button class="chip" data-level="10m">Ground level</button>
+        <button class="chip" data-level="500hPa">Mid sky</button>
+      </div>
+      <div class="hint" id="windhint">Waiting on the wind field</div>
+      <p style="margin-top:9px">Water vapor shows moisture in the middle of the atmosphere, bright where it is wet and dark where it is dry, which is the river the evaporated water joins. True color merges the eastern and western satellites into one seamless frame.</p>
     </div>
 
     <div class="sect">
@@ -1704,11 +1733,13 @@ function initPanel(){
       if(k === "wet"){ M.wet = v/100; out.textContent = v + " percent"; }
       if(k === "cf"){ M.cf = v/100; out.textContent = v + " percent"; }
       if(k === "ind"){ M.ind = v/100; out.textContent = v + " percent"; }
+      if(k === "satop"){ SKY.opacity = v/100; out.textContent = v + " percent"; if(satMaterial.opacity > 0) satMaterial.opacity = SKY.opacity; }
     }
     render();
     inp.addEventListener("input", render);
     inp.addEventListener("change", function(){
       render();
+      if(k === "satop") return;
       var keep = selected;
       combine();
       if(keep && keep.est) showSelection(keep);
@@ -1765,10 +1796,397 @@ function startDrought(){
   });
 }
 
+
+/* ================= sky: satellite drape and wind trails ================= */
+
+var NESDIS = "https://satellitemaps.nesdis.noaa.gov/arcgis/rest/services/";
+var SKY_LAYERS = {
+  color:{svc:"MERGEDGC_current", loop:"MERGEDGC_Last_24hr", label:"True color, eastern and western satellites merged", fmt:"jpg"},
+  vapor:{svc:"ABI10_current", loop:"ABI10_Last_24hr", label:"Low level water vapor", fmt:"jpg"},
+  ir:{svc:"ABI13_current", loop:"ABI13_Last_24hr", label:"Infrared cloud tops", fmt:"jpg"}
+};
+var SRC_BOX = [-180, 14, -60, 72];
+var SRC_W = 2400, SRC_H = 1160;
+var LUT_SCALE = 1.5, TGT_W = Math.round(975*LUT_SCALE), TGT_H = Math.round(610*LUT_SCALE);
+
+var SKY = {sat:true, wind:true, img:"color", opacity:0.85, level:"850hPa"};
+var satLut = null, satLutBuilding = false, satLutWaiters = [];
+var satSrcCanvas = document.createElement("canvas");
+satSrcCanvas.width = SRC_W; satSrcCanvas.height = SRC_H;
+var satTgtCanvas = document.createElement("canvas");
+satTgtCanvas.width = TGT_W; satTgtCanvas.height = TGT_H;
+var satTexture = new THREE.CanvasTexture(satTgtCanvas);
+satTexture.minFilter = THREE.LinearFilter;
+var satMaterial = new THREE.MeshBasicMaterial({map:satTexture, transparent:true, opacity:0, depthWrite:false});
+var satGroup = null, satToken = 0, loopTimer = null, loopFrames = [];
+
+function buildSatCaps(features){
+  satGroup = new THREE.Group();
+  features.forEach(function(f){
+    var shapes = featureShapes(f.geometry);
+    if(!shapes.length) return;
+    var geo = new THREE.ShapeGeometry(shapes);
+    var pos = geo.attributes.position, uv = geo.attributes.uv;
+    for(var i=0;i<pos.count;i++){
+      var px = pos.getX(i)*WORLD + PROJ_TX;
+      var py = PROJ_TY - pos.getY(i)*WORLD;
+      uv.setXY(i, px/975, 1 - py/610);
+    }
+    uv.needsUpdate = true;
+    geo.rotateX(-Math.PI/2);
+    var mesh = new THREE.Mesh(geo, satMaterial);
+    mesh.position.y = DEPTH + 0.008;
+    mesh.renderOrder = 0;
+    satGroup.add(mesh);
+  });
+  satGroup.visible = SKY.sat;
+  scene.add(satGroup);
+}
+
+function buildLut(done){
+  if(satLut){ done(); return; }
+  satLutWaiters.push(done);
+  if(satLutBuilding) return;
+  satLutBuilding = true;
+  var lut = new Int32Array(TGT_W*TGT_H);
+  var lonSpan = SRC_BOX[2]-SRC_BOX[0], latSpan = SRC_BOX[3]-SRC_BOX[1];
+  var y = 0, rows = 36;
+  function chunk(){
+    var end = Math.min(TGT_H, y+rows);
+    for(; y<end; y++){
+      for(var x=0;x<TGT_W;x++){
+        var ll = projection.invert([x/LUT_SCALE, y/LUT_SCALE]);
+        var k = y*TGT_W + x;
+        if(!ll || ll[0] < SRC_BOX[0] || ll[0] > SRC_BOX[2] || ll[1] < SRC_BOX[1] || ll[1] > SRC_BOX[3]){ lut[k] = -1; continue; }
+        var sx = Math.min(SRC_W-1, Math.floor((ll[0]-SRC_BOX[0])/lonSpan*SRC_W));
+        var sy = Math.min(SRC_H-1, Math.floor((SRC_BOX[3]-ll[1])/latSpan*SRC_H));
+        lut[k] = sy*SRC_W + sx;
+      }
+    }
+    if(y < TGT_H){
+      document.getElementById("skyhint").textContent = "Fitting imagery to the map, " + Math.round(y/TGT_H*100) + " percent";
+      setTimeout(chunk, 0);
+    } else {
+      satLut = lut; satLutBuilding = false;
+      var w = satLutWaiters; satLutWaiters = [];
+      w.forEach(function(fn){ fn(); });
+    }
+  }
+  chunk();
+}
+
+function exportUrl(svc, time, fmt, viaBackend){
+  var q = new URLSearchParams({
+    bbox: SRC_BOX.join(","), bboxSR:"4326", imageSR:"4326",
+    size: SRC_W + "," + SRC_H, format: fmt || "jpg", f:"image"
+  });
+  if(time) q.set("time", String(time));
+  if(viaBackend){
+    q.set("svc", svc);
+    return api("/api/satimg?" + q.toString());
+  }
+  return NESDIS + svc + "/ImageServer/exportImage?" + q.toString();
+}
+
+function loadImage(url){
+  return new Promise(function(res, rej){
+    var img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = function(){ res(img); };
+    img.onerror = function(){ rej(new Error("image")); };
+    img.src = url;
+  });
+}
+
+function fetchFrame(svc, time, fmt){
+  var direct = exportUrl(svc, time, fmt, false);
+  var viaApi = apiBase ? exportUrl(svc, time, fmt, true) : null;
+  var first = viaApi ? loadImage(viaApi).catch(function(){ return loadImage(direct); }) : loadImage(direct);
+  return first.then(function(img){
+    var g = satSrcCanvas.getContext("2d");
+    g.clearRect(0,0,SRC_W,SRC_H);
+    g.drawImage(img, 0, 0, SRC_W, SRC_H);
+    return g.getImageData(0,0,SRC_W,SRC_H).data.slice();
+  });
+}
+
+function paintFrame(src){
+  var g = satTgtCanvas.getContext("2d");
+  var out = g.createImageData(TGT_W, TGT_H), d = out.data;
+  for(var k=0;k<satLut.length;k++){
+    var s = satLut[k];
+    if(s < 0) continue;
+    var si = s*4, di = k*4;
+    d[di] = src[si]; d[di+1] = src[si+1]; d[di+2] = src[si+2]; d[di+3] = 255;
+  }
+  g.putImageData(out, 0, 0);
+  satTexture.needsUpdate = true;
+  satMaterial.opacity = SKY.opacity;
+}
+
+function stopLoop(){
+  if(loopTimer){ clearInterval(loopTimer); loopTimer = null; }
+  document.getElementById("btnloop").classList.remove("on");
+}
+
+function loadSky(){
+  if(!SKY.sat) return;
+  stopLoop();
+  var token = ++satToken;
+  var L = SKY_LAYERS[SKY.img];
+  var hint = document.getElementById("skyhint");
+  hint.textContent = "Pulling the latest " + L.label.toLowerCase();
+  buildLut(function(){
+    fetchFrame(L.svc, null, L.fmt).then(function(src){
+      if(token !== satToken) return;
+      paintFrame(src);
+      hint.textContent = L.label + ", latest frame, pulled " +
+        new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}) + ". Refreshes every ten minutes.";
+    }).catch(function(){
+      if(token !== satToken) return;
+      hint.textContent = apiBase
+        ? "The imagery service did not answer. It retries on the next refresh."
+        : "The imagery service refused this browser. Set the backend address below and it routes through there.";
+    });
+  });
+}
+
+function playLoop(){
+  if(loopTimer){ stopLoop(); loadSky(); return; }
+  var L = SKY_LAYERS[SKY.img];
+  var hint = document.getElementById("skyhint");
+  var btn = document.getElementById("btnloop");
+  btn.classList.add("on");
+  var token = ++satToken;
+  hint.textContent = "Reading the last day of " + L.label.toLowerCase();
+  getJSON(NESDIS + L.loop + "/ImageServer?f=json").then(function(info){
+    var ext = info.timeInfo && info.timeInfo.timeExtent;
+    if(!ext) throw new Error("no time");
+    var start = ext[0], end = ext[1], step = 2*3600*1000;
+    var times = [];
+    for(var t=start + step; t<=end; t+=step) times.push(t);
+    if(!times.length || times[times.length-1] !== end) times.push(end);
+    loopFrames = [];
+    return new Promise(function(res){
+      buildLut(function(){
+        var i = 0;
+        function next(){
+          if(token !== satToken) return res();
+          if(i >= times.length) return res();
+          var t = times[i++];
+          hint.textContent = "Loading frame " + i + " of the day";
+          fetchFrame(L.loop, t, L.fmt).then(function(src){
+            loopFrames.push({t:t, src:src});
+          }).catch(function(){}).then(next);
+        }
+        next();
+      });
+    });
+  }).then(function(){
+    if(token !== satToken) return;
+    if(!loopFrames.length) throw new Error("no frames");
+    var f = 0;
+    loopTimer = setInterval(function(){
+      var fr = loopFrames[f % loopFrames.length];
+      paintFrame(fr.src);
+      hint.textContent = L.label + ", " + new Date(fr.t).toLocaleString([], {weekday:"short", hour:"2-digit", minute:"2-digit"});
+      f++;
+    }, 700);
+  }).catch(function(){
+    stopLoop();
+    hint.textContent = "The day loop did not load. Showing the latest frame.";
+    loadSky();
+  });
+}
+
+/* wind field */
+
+var WIND = {grid:null, lats:null, lons:null, time:null};
+var windLines = null, windParticles = [];
+var WIND_N = window.innerWidth < 820 ? 1800 : 3200;
+var TRAIL = 7;
+var windTimer = null;
+
+function loadWind(){
+  var lats = [], lons = [];
+  for(var la=22; la<=52; la+=2) lats.push(la);
+  for(var lo=-128; lo<=-64; lo+=2) lons.push(lo);
+  var pts = [];
+  lats.forEach(function(la){ lons.forEach(function(lo){ pts.push([la, lo]); }); });
+  var hint = document.getElementById("windhint");
+  hint.textContent = "Reading the wind field";
+  var lvl = SKY.level;
+  var vs = "wind_speed_" + lvl, vd = "wind_direction_" + lvl;
+  var batches = [];
+  for(var i=0;i<pts.length;i+=150) batches.push(pts.slice(i, i+150));
+
+  var viaApi = api("/api/windgrid?level=" + lvl);
+  var job = viaApi ? getJSON(viaApi).then(function(j){ return j.cells; }) :
+    Promise.all(batches.map(function(b){
+      var u = METEO + "?latitude=" + b.map(function(p){ return p[0]; }).join(",") +
+        "&longitude=" + b.map(function(p){ return p[1]; }).join(",") +
+        "&hourly=" + vs + "," + vd + "&forecast_days=1&timezone=UTC";
+      return getJSON(u).then(function(j){
+        var arr = Array.isArray(j) ? j : [j];
+        return arr.map(function(r){
+          if(!r.hourly) return null;
+          var now = Date.now();
+          var idx = r.hourly.time.findIndex(function(t){ return new Date(t+"Z").getTime() >= now - 1800000; });
+          if(idx < 0) idx = r.hourly.time.length-1;
+          return {s:r.hourly[vs][idx], d:r.hourly[vd][idx], t:r.hourly.time[idx]};
+        });
+      });
+    })).then(function(parts){ return [].concat.apply([], parts); });
+
+  job.then(function(cells){
+    var grid = new Float32Array(lats.length*lons.length*2);
+    var stamp = null, maxS = 0;
+    cells.forEach(function(c, i){
+      if(!c || c.s == null || c.d == null){ grid[i*2] = 0; grid[i*2+1] = 0; return; }
+      var ms = c.s/3.6, r = c.d*Math.PI/180;
+      grid[i*2] = -ms*Math.sin(r);
+      grid[i*2+1] = -ms*Math.cos(r);
+      if(ms > maxS) maxS = ms;
+      if(!stamp) stamp = c.t;
+    });
+    WIND.grid = grid; WIND.lats = lats; WIND.lons = lons; WIND.time = stamp; WIND.max = maxS;
+    var lvlName = lvl === "850hPa" ? "plume level, about 1500 metres" : lvl === "10m" ? "ground level" : "mid sky, about 5500 metres";
+    hint.textContent = "Wind at " + lvlName + (stamp ? ", hour of " + new Date(stamp + "Z").toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}) : "") +
+      ". Fastest " + Math.round(maxS*2.237) + " mph.";
+    if(!windLines) buildWindLines();
+  }).catch(function(){
+    hint.textContent = "The wind service did not answer. It retries in half an hour.";
+  });
+}
+
+function sampleWind(lon, lat){
+  var g = WIND.grid; if(!g) return null;
+  var la0 = WIND.lats[0], lo0 = WIND.lons[0];
+  var fy = (lat - la0)/2, fx = (lon - lo0)/2;
+  var nx = WIND.lons.length, ny = WIND.lats.length;
+  if(fx < 0 || fy < 0 || fx >= nx-1 || fy >= ny-1) return null;
+  var x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx-x0, ty = fy-y0;
+  function at(x,y,c){ return g[(y*nx + x)*2 + c]; }
+  var u = (at(x0,y0,0)*(1-tx) + at(x0+1,y0,0)*tx)*(1-ty) + (at(x0,y0+1,0)*(1-tx) + at(x0+1,y0+1,0)*tx)*ty;
+  var v = (at(x0,y0,1)*(1-tx) + at(x0+1,y0,1)*tx)*(1-ty) + (at(x0,y0+1,1)*(1-tx) + at(x0+1,y0+1,1)*tx)*ty;
+  return [u, v];
+}
+
+function spawn(p){
+  for(var tries=0; tries<12; tries++){
+    var lon = -125 + Math.random()*58, lat = 24.5 + Math.random()*25;
+    var w = toWorld(lon, lat);
+    if(w && sampleWind(lon, lat)){
+      p.lon = lon; p.lat = lat; p.age = 0; p.max = 60 + Math.random()*120;
+      for(var i=0;i<TRAIL;i++){ p.trail[i*3] = w.x; p.trail[i*3+1] = DEPTH + 1.3; p.trail[i*3+2] = w.z; }
+      return;
+    }
+  }
+  p.age = p.max = 0;
+}
+
+function buildWindLines(){
+  var segs = TRAIL - 1;
+  var pos = new Float32Array(WIND_N*segs*2*3);
+  var col = new Float32Array(WIND_N*segs*2*3);
+  var geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  windLines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({vertexColors:true, transparent:true, opacity:0.9, depthWrite:false}));
+  windLines.frustumCulled = false;
+  windLines.renderOrder = 20;
+  windLines.visible = SKY.wind;
+  scene.add(windLines);
+  windParticles = [];
+  for(var i=0;i<WIND_N;i++){
+    var p = {trail:new Float32Array(TRAIL*3)};
+    spawn(p);
+    p.age = Math.random()*p.max;
+    windParticles.push(p);
+  }
+}
+
+var C_SLOW = new THREE.Color(0x9DB8F0), C_FAST = new THREE.Color(0x0B2E9E), C_BG = new THREE.Color(0xE9E7DD), C_TMP = new THREE.Color();
+
+function stepWind(){
+  if(!windLines || !SKY.wind || !WIND.grid) return;
+  var pos = windLines.geometry.attributes.position.array;
+  var col = windLines.geometry.attributes.color.array;
+  var segs = TRAIL - 1, k = 0, K = 0.0042;
+  for(var n=0;n<windParticles.length;n++){
+    var p = windParticles[n];
+    p.age++;
+    var w = p.age < p.max ? sampleWind(p.lon, p.lat) : null;
+    var wp = null;
+    if(w){
+      p.lat += w[1]*K;
+      p.lon += w[0]*K / Math.max(0.2, Math.cos(p.lat*Math.PI/180));
+      wp = toWorld(p.lon, p.lat);
+    }
+    if(!wp){ spawn(p); continue; }
+    var t = p.trail;
+    for(var i=TRAIL-1;i>0;i--){ t[i*3] = t[(i-1)*3]; t[i*3+1] = t[(i-1)*3+1]; t[i*3+2] = t[(i-1)*3+2]; }
+    t[0] = wp.x; t[1] = DEPTH + 1.3; t[2] = wp.z;
+    var sp = Math.sqrt(w[0]*w[0] + w[1]*w[1]);
+    var r = Math.min(1, sp / Math.max(12, WIND.max*0.8));
+    var fadeIn = Math.min(1, p.age/12), fadeOut = Math.min(1, (p.max - p.age)/12);
+    var life = Math.min(fadeIn, fadeOut);
+    for(var s=0;s<segs;s++){
+      var a = (1 - s/segs) * life;
+      C_TMP.copy(C_SLOW).lerp(C_FAST, r);
+      C_TMP.lerp(C_BG, 1 - a);
+      pos[k] = t[s*3]; pos[k+1] = t[s*3+1]; pos[k+2] = t[s*3+2];
+      col[k] = C_TMP.r; col[k+1] = C_TMP.g; col[k+2] = C_TMP.b; k += 3;
+      C_TMP.copy(C_SLOW).lerp(C_FAST, r).lerp(C_BG, 1 - (1 - (s+1)/segs)*life);
+      pos[k] = t[(s+1)*3]; pos[k+1] = t[(s+1)*3+1]; pos[k+2] = t[(s+1)*3+2];
+      col[k] = C_TMP.r; col[k+1] = C_TMP.g; col[k+2] = C_TMP.b; k += 3;
+    }
+  }
+  windLines.geometry.attributes.position.needsUpdate = true;
+  windLines.geometry.attributes.color.needsUpdate = true;
+}
+
+function initSky(){
+  document.querySelectorAll("[data-sky]").forEach(function(b){
+    b.addEventListener("click", function(){
+      var k = b.getAttribute("data-sky");
+      SKY[k] = !SKY[k];
+      b.classList.toggle("on", SKY[k]);
+      if(k === "sat"){
+        if(satGroup) satGroup.visible = SKY.sat;
+        if(SKY.sat && satMaterial.opacity === 0) loadSky();
+        if(!SKY.sat) stopLoop();
+      }
+      if(k === "wind" && windLines) windLines.visible = SKY.wind;
+    });
+  });
+  document.querySelectorAll("[data-img]").forEach(function(b){
+    b.addEventListener("click", function(){
+      document.querySelectorAll("[data-img]").forEach(function(x){ x.classList.remove("on"); });
+      b.classList.add("on");
+      SKY.img = b.getAttribute("data-img");
+      loadSky();
+    });
+  });
+  document.querySelectorAll("[data-level]").forEach(function(b){
+    b.addEventListener("click", function(){
+      document.querySelectorAll("[data-level]").forEach(function(x){ x.classList.remove("on"); });
+      b.classList.add("on");
+      SKY.level = b.getAttribute("data-level");
+      loadWind();
+    });
+  });
+  document.getElementById("btnloop").addEventListener("click", playLoop);
+  document.getElementById("btnnow").addEventListener("click", function(){ stopLoop(); loadSky(); });
+  setInterval(function(){ if(!loopTimer) loadSky(); }, 600000);
+  setInterval(loadWind, 1800000);
+}
+
 /* ================= boot ================= */
 
 function animate(){
   requestAnimationFrame(animate);
+  stepWind();
   renderer.render(scene, camera);
 }
 
@@ -1782,6 +2200,10 @@ getJSON(STATES_URL).then(function(topo){
   var feats = topojson.feature(topo, topo.objects.states).features;
   buildMap(feats);
   stateFeatures = prepFeatures(feats);
+  buildSatCaps(feats);
+  initSky();
+  loadSky();
+  loadWind();
   feats.forEach(function(f){
     var ab = FIPS[f.id];
     if(ab){ NAME_TO_ABBR[f.properties.name.toLowerCase()] = ab; ABBR_TO_NAME[ab] = f.properties.name; }

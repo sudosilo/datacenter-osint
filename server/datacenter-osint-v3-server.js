@@ -515,6 +515,84 @@ app.get("/api/plume", async (req, res) => {
   }
 });
 
+/* ---------- satellite imagery mosaic ---------- */
+
+const NESDIS = "https://satellitemaps.nesdis.noaa.gov/arcgis/rest/services/";
+const SAT_SVCS = new Set([
+  "MERGEDGC_current", "MERGEDGC_Last_24hr",
+  "ABI10_current", "ABI10_Last_24hr",
+  "ABI13_current", "ABI13_Last_24hr"
+]);
+
+app.get("/api/satimg", async (req, res) => {
+  const svc = req.query.svc;
+  if (!SAT_SVCS.has(svc)) return res.status(400).json({ error: "unknown layer" });
+  const q = new URLSearchParams({
+    bbox: String(req.query.bbox || "-180,14,-60,72"),
+    bboxSR: "4326",
+    imageSR: "4326",
+    size: String(req.query.size || "2400,1160"),
+    format: req.query.format === "png" ? "png" : "jpg",
+    f: "image"
+  });
+  if (req.query.time && /^\d+$/.test(String(req.query.time))) q.set("time", String(req.query.time));
+  const key = "dco:satimg:" + svc + ":" + (q.get("time") || Math.floor(Date.now() / 600000));
+  try {
+    let b64 = await cacheGet(key);
+    if (!b64) {
+      const up = await fetch(NESDIS + svc + "/ImageServer/exportImage?" + q.toString());
+      if (!up.ok) throw new Error("status " + up.status);
+      b64 = Buffer.from(await up.arrayBuffer()).toString("base64");
+      await cacheSet(key, b64, q.get("time") ? DAY : 600);
+    }
+    res.set("Content-Type", q.get("format") === "png" ? "image/png" : "image/jpeg");
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Cache-Control", "public, max-age=300");
+    res.send(Buffer.from(b64, "base64"));
+  } catch (e) {
+    console.error("satimg", svc, e.message);
+    res.status(502).end();
+  }
+});
+
+/* ---------- wind grid ---------- */
+
+app.get("/api/windgrid", async (req, res) => {
+  const level = ["850hPa", "10m", "500hPa"].includes(req.query.level) ? req.query.level : "850hPa";
+  const bucket = Math.floor(Date.now() / 1800000);
+  try {
+    const cells = await cached("dco:wind:" + level + ":" + bucket, 1800, async () => {
+      const pts = [];
+      for (let la = 22; la <= 52; la += 2) for (let lo = -128; lo <= -64; lo += 2) pts.push([la, lo]);
+      const vs = "wind_speed_" + level;
+      const vd = "wind_direction_" + level;
+      const out = [];
+      for (let i = 0; i < pts.length; i += 150) {
+        const b = pts.slice(i, i + 150);
+        const u =
+          METEO +
+          "?latitude=" + b.map((p) => p[0]).join(",") +
+          "&longitude=" + b.map((p) => p[1]).join(",") +
+          "&hourly=" + vs + "," + vd + "&forecast_days=1&timezone=UTC";
+        const j = await getJSON(u);
+        const arr = Array.isArray(j) ? j : [j];
+        for (const r of arr) {
+          if (!r.hourly) { out.push(null); continue; }
+          const now = Date.now();
+          let idx = r.hourly.time.findIndex((t) => new Date(t + "Z").getTime() >= now - 1800000);
+          if (idx < 0) idx = r.hourly.time.length - 1;
+          out.push({ s: r.hourly[vs][idx], d: r.hourly[vd][idx], t: r.hourly.time[idx] });
+        }
+      }
+      return out;
+    });
+    res.json({ level, cells });
+  } catch (e) {
+    console.error("windgrid", e.message);
+    res.status(502).json({ error: "wind service failed" });
+  }
+});
+
 /* ---------- satellite ---------- */
 
 app.get("/api/satellite", async (req, res) => {
@@ -549,7 +627,7 @@ app.get("/api/health", async (req, res) => {
 app.get("/", (req, res) => {
   res
     .type("text/plain")
-    .send("data center osint api. endpoints: /api/osm /api/power /api/industry /api/drought /api/plume /api/satellite /api/health");
+    .send("data center osint api. endpoints: /api/osm /api/power /api/industry /api/drought /api/plume /api/satellite /api/satimg /api/windgrid /api/health");
 });
 
 async function warm() {
