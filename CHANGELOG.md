@@ -1,0 +1,1 @@
+2026-10-09, v2026.10.09. Version 4 opens on the whole country. Added power plants, heavy industry, cooling towers, drought, and a backend. The map now shows live satellite imagery with a last day loop, water vapor, infrared, and moving wind trails. An eastern satellite covers the country view, and the panel is shorter and closes when the map is dragged.
