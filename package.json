@@ -1,0 +1,12 @@
+{
+  "name": "datacenter-osint",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "ioredis": "^5.4.1"
+  }
+}

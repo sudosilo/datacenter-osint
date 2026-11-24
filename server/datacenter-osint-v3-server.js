@@ -656,8 +656,12 @@ async function warm() {
   }
 }
 
-app.listen(PORT, () => {
-  console.log("listening on " + PORT);
-  setTimeout(warm, 8000);
-  setInterval(warm, REFRESH_MS);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log("listening on " + PORT);
+    setTimeout(warm, 8000);
+    setInterval(warm, REFRESH_MS);
+  });
+}
+
+module.exports = app;

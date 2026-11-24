@@ -452,7 +452,7 @@ var SEED = [
 
 /* ================= state ================= */
 
-var apiBase = "";
+var apiBase = location.host;
 var qp = new URLSearchParams(location.search).get("api");
 if(qp) apiBase = qp.trim();
 

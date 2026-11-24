@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/datacenter-osint-api" }
+  ],
+  "functions": {
+    "api/datacenter-osint-api.js": { "maxDuration": 60 }
+  }
+}
